@@ -1,5 +1,6 @@
 import {createRoom,join,act,view,RuleError} from './game.mjs';
 import {config,askAI} from './ai.mjs';
+import {botTarget,prepareBotTurn,askBot} from './bots.mjs';
 import assets from 'virtual:assets';
 class Fault extends Error {constructor(message,status=400){super(message);this.status=status;}}
 const fail=(message,status)=>{throw new Fault(message,status);};
@@ -18,6 +19,51 @@ async function save(db,r,rev,{message,seat}={}){r.revision=rev+1;
  return (await db.batch(statements))[0].meta.changes===1;}
 async function chatRows(db,code,id,{before=null}={}){const params=[code,id,id];const n=(await db.prepare('SELECT count(*) AS n FROM messages WHERE room=? AND (recipient IS NULL OR recipient=? OR sender=?)').bind(...params).first()).n;const end=before===null?n:Math.min(before,n),start=Math.max(0,end-100);const rows=(await db.prepare('SELECT id,sender AS "from",recipient AS "to",body AS text,at FROM messages WHERE room=? AND (recipient IS NULL OR recipient=? OR sender=?) ORDER BY rowid LIMIT ? OFFSET ?').bind(...params,end-start,start).all()).results;return {messages:rows,messageCount:n,before:start};}
 async function state(db,r,id,cfg){const rows=(await db.prepare('SELECT player,seen FROM seats WHERE room=?').bind(r.code).all()).results;const now=Date.now(),hostSeen=rows.find(p=>p.player===r.host)?.seen||r.createdAt;return {...view(r,id,rows.filter(p=>now-p.seen<20000).map(p=>p.player)),...await chatRows(db,r.code,id),ai:{configured:Boolean(cfg.key),model:cfg.model,remaining:Math.max(0,cfg.budget-r.aiCount)},hostAbsentSince:now-hostSeen>=20000?hostSeen:null};}
+async function runBot(db,r,id,data,bot,cfg){
+ const {type,payload,requestId}=data,key=id+':'+requestId,turn=type==='botTurn';
+ if(r.phase===0||r.phase===8||r.paused)fail('AI 玩家在开局后、未暂停时参与对话和行动');
+ if(turn&&r.host!==id)fail('只有房主可以让 AI 完成本幕',403);
+ if(turn&&(bot.ready||bot.vote&&r.phase===7))fail('这位 AI 已完成本幕，可以通过 @ 继续对话');
+ if(!cfg.key)fail('请先配置服务端 AI 密钥');
+ if(bot.botTask?.until>Date.now())fail('这位 AI 正在思考，请稍后再试');
+ if(r.aiCount>=cfg.budget)fail('本局 AI 调用次数已用完');
+ const count=(await db.prepare('SELECT count(*) AS n FROM messages WHERE room=?').bind(r.code).first()).n;
+ if(count>=4999)fail('本局消息上限已到达');
+ const phase=r.phase,rev=r.revision;
+ if(!turn)act(r,id,'chat',payload);
+ bot.botTask={key,until:Date.now()+cfg.timeout+5000};r.aiCount++;r.requests[key]={bot:true,status:'pending'};
+ if(!await save(db,r,rev,{message:turn?undefined:r.messages.at(-1)}))return json({message:'房间状态已更新，请重试',state:await state(db,await room(db,r.code,id),id,cfg)},409);
+ let answer,botError;
+ const planned=turn?prepareBotTurn(r,bot.id):r;
+ const snapshot=view(planned,bot.id);
+ try{
+  const history=(await chatRows(db,r.code,bot.id)).messages;
+  answer=await askBot(snapshot,history,{turn,question:payload.text,privateTo:payload.to?id:null},cfg);
+ }catch{botError='AI 玩家暂时无法回复，本幕未自动完成；请稍后重试。';}
+ for(let attempt=0;attempt<5;attempt++){
+  const current=await room(db,r.code,id),revision=current.revision,p=current.players.find(q=>q.id===bot.id);
+  if(p?.botTask?.key!==key)return json({type:'ack',botError:'这次回复已过期，请重新提问。',state:await state(db,current,id,cfg)});
+  let updated=current,message;
+  if(!botError&&(current.phase!==phase||current.paused))botError='阶段已改变或游戏已暂停，AI 回复已取消。';
+  if(!botError){
+   try{
+    updated=turn?prepareBotTurn(current,bot.id):structuredClone(current);
+    if(turn&&JSON.stringify(view(updated,bot.id).clues)!==JSON.stringify(snapshot.clues))throw new RuleError('证据有更新，请重新让 AI 完成本幕');
+    if(turn){
+     if(phase===7)act(updated,bot.id,'vote',answer.vote);
+     else act(updated,bot.id,'ready',{value:true});
+    }
+    if((await db.prepare('SELECT count(*) AS n FROM messages WHERE room=?').bind(r.code).first()).n>=5000)throw new RuleError('本局消息上限已到达');
+    act(updated,bot.id,'chat',{text:turn&&phase===7?'我已提交秘密指控，结案后再说明我的选择。':answer.text,to:turn?null:payload.to?id:null});
+    message=updated.messages.at(-1);
+   }catch{updated=current;message=undefined;botError='AI 行动未通过当前规则检查，本幕未完成；请重试。';}
+  }
+  updated.players.find(q=>q.id===bot.id).botTask=null;
+  updated.requests[key]={bot:true,status:botError?'failed':'done',...(botError?{botError}:{})};
+  if(await save(db,updated,revision,{message}))return json({type:'ack',requestId,botError,state:await state(db,updated,id,cfg)});
+ }
+ return json({type:'ack',requestId,botError:'房间更新频繁，回复未保存；请稍后检查状态再重试。',state:await state(db,await room(db,r.code,id),id,cfg)});
+}
 async function handle(req,env){
  const url=new URL(req.url),path=url.pathname,db=env.DB;
  if(req.method==='GET'&&Object.hasOwn(assets,path)){const a=assets[path];return new Response(a.body,{headers:{'Content-Type':a.type,'Cache-Control':'no-cache'}});}
@@ -61,9 +107,14 @@ async function handle(req,env){
  if(path!=='/api/action')return json({error:'不存在'},404);
  const {type,requestId,payload={}}=data;if(typeof type!=='string'||typeof requestId!=='string'||! /^[\w-]{8,80}$/.test(requestId))fail('无效操作');
  let r=await room(db,data.room,id);const key=id+':'+requestId;
+ if(r.requests[key]?.bot)return json({type:'ack',requestId,duplicate:true,botError:r.requests[key].botError,state:await state(db,r,id,cfg)});
  if(type==='history'){if(!Number.isInteger(payload?.before)||payload.before<0)fail('分页参数无效');return json({type:'history',requestId,...await chatRows(db,r.code,id,{before:payload.before})});}
  if(r.requests[key]){const cached=r.players.find(p=>p.id===id).lastAI;return json({...(cached?.requestId===requestId?cached.answer?{type:'ai',...(cached.phase===r.phase?cached.answer:{mode:'rules',text:'阶段已变化，请根据当前材料重新提问。'})}:{type:'ai',mode:'rules',text:cached.until>Date.now()?'主持仍在处理中，请稍后重试。':'上次主持回复未完成，请重新提问。'}:{type:'ack'}),requestId,duplicate:true,state:await state(db,r,id,cfg)});}
  if(data.expectedRevision!==r.revision)return json({type:'error',requestId,message:'房间状态已更新，请确认后重试',state:await state(db,r,id,cfg)},409);
+ if(!payload||typeof payload!=='object'||Array.isArray(payload))fail('无效操作参数');
+ const bot=type==='botTurn'?r.players.find(p=>p.bot&&p.id===payload.playerId):type==='chat'?botTarget(r,payload):null;
+ if(type==='botTurn'&&!bot)fail('AI 玩家不存在');
+ if(bot)return runBot(db,r,id,data,bot,cfg);
  if(type==='chat'&&(await db.prepare('SELECT count(*) AS n FROM messages WHERE room=?').bind(r.code).first()).n>=5000)fail('本局消息上限已到达');
  const revision=r.revision;
  if(type==='askAI'){

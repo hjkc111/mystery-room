@@ -12,14 +12,18 @@ export function promptFor(v,question) {
     {role:'user',content:question},
   ];
 }
+export async function complete(messages,cfg) {
+  if(!cfg.key)throw new Error('Missing API key');
+  const response=await fetch(`${cfg.base}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${cfg.key}`},signal:AbortSignal.timeout(cfg.timeout),body:JSON.stringify({model:cfg.model,messages,max_tokens:cfg.maxTokens,stream:false,...(new URL(cfg.base).hostname==='api.deepseek.com'?{thinking:{type:'disabled'}}:{})})});
+  if(!response.ok)throw new Error(`HTTP ${response.status}`);
+  const data=await response.json(),content=data?.choices?.[0]?.message?.content;
+  if(typeof content!=='string'||!content.trim()||content.length>12000)throw new Error('Invalid AI response');
+  return content.trim();
+}
 export async function askAI(v,question,cfg=config()) {
   const fallback={mode:'rules',text:`${v.stage.guide}\n提示：先查看「我的剧本」和「证据袋」，将时间、地点和人物证词逐条对照。主持不会替你给出凶手。`};
   if(!cfg.key) return {...fallback,reason:'未配置 DEEPSEEK_API_KEY，使用规则主持。'};
   try {
-    const response=await fetch(`${cfg.base}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${cfg.key}`},signal:AbortSignal.timeout(cfg.timeout),body:JSON.stringify({model:cfg.model,messages:promptFor(v,question),max_tokens:cfg.maxTokens,stream:false,...(new URL(cfg.base).hostname==='api.deepseek.com'?{thinking:{type:'disabled'}}:{})})});
-    if(!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data=await response.json(), content=data?.choices?.[0]?.message?.content;
-    if(typeof content!=='string'||!content.trim()||content.length>12000) throw new Error('无效模型响应');
-    return {mode:'ai',model:cfg.model,text:content.trim()};
+    return {mode:'ai',model:cfg.model,text:await complete(promptFor(v,question),cfg)};
   } catch {return {...fallback,reason:'AI 暂时不可用，已切换规则主持；游戏进度不受影响。'};}
 }

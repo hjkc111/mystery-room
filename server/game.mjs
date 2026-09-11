@@ -37,6 +37,7 @@ function enter(r,index) {
 export function advanceProblem(r) {
   if(r.phase===8) return '本局已结束';
   if(r.paused) return '请先恢复游戏';
+  if(r.players.some(p=>p.botTask?.until>Date.now())) return '请等待 AI 玩家完成当前回复';
   if(r.phase===0 && (r.players.length!==CASE.roles.length || r.players.some(p=>p.role===null))) return '需要四位玩家各自选择不同角色';
   if(r.phase===3 && r.players.some(p=>!p.clues.some(id=>evidence(id).owner===p.role && evidence(id).round===1))) return '每位玩家须完成自己的个人调查';
   if(r.phase===4 && r.players.some(p=>!(p.shared||[]).some(id=>evidence(id).round===1))) return '每位玩家至少亲自公开一张第一轮证据';
@@ -50,7 +51,20 @@ export function act(r,id,type,payload={}) {
   const p=member(r,id);
   if(!payload || typeof payload!=='object' || Array.isArray(payload)) fail('无效操作参数');
   if(r.paused && !['pause','extend','chat','note','claimHost'].includes(type)) fail('游戏暂停中');
-  if(type==='role') {
+  if(type==='setBot') {
+    isHost(r,id);
+    if(r.phase!==0) fail('请在开局前设置 AI 角色');
+    if(!Number.isInteger(payload.role)||!CASE.roles[payload.role]||typeof payload.enabled!=='boolean') fail('无效 AI 角色设置');
+    const owner=r.players.find(q=>q.role===payload.role);
+    if(payload.enabled){
+      if(owner) fail('角色已有人选择，请先让出角色');
+      if(r.players.length>=CASE.roles.length) fail('房间已满');
+      r.players.push({id:'bot-'+crypto.randomUUID(),name:CASE.roles[payload.role].name,role:payload.role,bot:true,ready:true,clues:[],ap:0,note:'',vote:null});
+    }else{
+      if(!owner?.bot) fail('这个角色不是 AI 玩家');
+      r.players=r.players.filter(q=>q.id!==owner.id);
+    }
+  } else if(type==='role') {
     if(r.phase!==0) fail('开局后不能换角色');
     if(!Number.isInteger(payload.role) || !CASE.roles[payload.role]) fail('角色不存在');
     if(r.players.some(q=>q.id!==id && q.role===payload.role)) fail('角色已被选择');
@@ -105,7 +119,7 @@ export function view(r,id,online=[]) {
     code:r.code,revision:r.revision,host:r.host,phase:r.phase,stage:PHASES[r.phase],phases:PHASES.map(({key,name})=>({key,name})),deadline:r.deadline,paused:r.paused,remaining:r.remaining,serverTime:Date.now(),
     case:{id:CASE.id,title:CASE.title,subtitle:CASE.subtitle,intro:CASE.intro,source:CASE.source},
     roles:CASE.roles.map(({name,publicBio},i)=>({id:i,name,publicBio})),
-    players:r.players.map(q=>({id:q.id,name:q.name,role:q.role,ready:q.ready,online:online.includes(q.id),voted:Boolean(q.vote)})),
+    players:r.players.map(q=>({id:q.id,name:q.name,role:q.role,bot:Boolean(q.bot),thinking:q.botTask?.until>Date.now(),ready:q.ready,online:q.bot||online.includes(q.id),voted:Boolean(q.vote)})),
     me:{id:p.id,name:p.name,role:p.role,ap:p.ap,note:p.note,vote:p.vote,shared:p.shared||[],goal:r.phase>0&&p.role!==null?CASE.roles[p.role].goal:null},chapters,
     clues:CASE.evidence.filter(e=>known.includes(e.id)).map(({id,title,body,round})=>({id,title,body,round,public:r.published.includes(id),owned:p.clues.includes(id)})),
     targets:[3,5].includes(r.phase)?CASE.evidence.filter(e=>e.round===(r.phase===3?1:2)&&(e.owner===null||e.owner===p.role)).map(e=>{const done=r.phase===5?r.players.some(q=>q.clues.includes(e.id)):p.clues.includes(e.id);return {id:e.id,title:e.target,description:e.description,personal:e.owner!==null,done,available:!r.paused&&p.ap>0&&!done&&(r.phase!==3||e.owner!==null||p.clues.some(id=>evidence(id).owner===p.role))};}):[],
