@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {chromium} from 'playwright';
+import {writeFileSync} from 'node:fs';
+import {walk,position} from './scene-test-helpers.mjs';
+const browser=await chromium.launch({channel:'chrome',headless:true,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding']}),pages=[],errors=[],metrics={};
+try{
+ for(let i=0;i<2;i++){const c=await browser.newContext({viewport:{width:1280,height:900}}),p=await c.newPage();pages.push(p);p.on('pageerror',e=>errors.push(e.message));await p.goto((process.env.TEST_URL||'http://127.0.0.1:4318/')+'?noRTC');await p.locator('#connection').filter({hasText:'身份已就绪'}).waitFor();await p.locator('#name').fill('回退玩家'+i);}
+ await pages[0].locator('#create').click();await pages[0].locator('#roomCode').filter({hasText:/[A-F0-9]{6}/}).waitFor();const code=(await pages[0].locator('#roomCode').innerText()).trim();await pages[1].locator('#code').fill(code);await pages[1].locator('#joinForm button').click();await pages[1].locator('#world').waitFor();await pages[0].waitForTimeout(1200);
+ assert.equal(await pages[0].locator('#world').getAttribute('data-transport'),'HTTP');const id=await pages[0].evaluate(async()=> (await (await fetch('/api/session')).json()).id),before=await position(pages[0]);
+ await pages[0].locator('#world').focus();const started=Date.now();await pages[0].keyboard.down('ArrowRight');await pages[1].waitForFunction(({id,x})=>JSON.parse(document.querySelector('#world').dataset.peers).some(p=>p.id===id&&p.x>x+10),{id,x:before.x});metrics.fallbackMovementMs=Date.now()-started;await pages[0].keyboard.up('ArrowRight');await pages[0].evaluate(()=>window.scene.flush());
+ await pages[0].context().setOffline(true);await pages[0].locator('#connection').filter({hasText:'同步中断'}).waitFor();await pages[0].context().setOffline(false);await pages[0].locator('#connection').filter({hasText:'已连接'}).waitFor({timeout:30000});await walk(pages[0],{x:580,y:368});const saved=await position(pages[0]);await pages[0].reload();await pages[0].locator('#world').waitFor();await pages[0].waitForTimeout(700);const restored=await position(pages[0]);assert.ok(Math.hypot(saved.x-restored.x,saved.y-restored.y)<5);
+ await pages[0].context().setOffline(true);await pages[0].waitForTimeout(21500);await pages[0].context().setOffline(false);await pages[0].reload();await pages[0].locator('#world').waitFor();await pages[0].waitForTimeout(700);assert.ok(Math.abs((await position(pages[0])).x-324)<5);await walk(pages[0],{x:400,y:368});
+ assert.deepEqual(errors,[]);metrics.passed=true;metrics.offlineExpiryRecovery=true;metrics.reloadPersistence=true;writeFileSync('test-results/scene-resilience.json',JSON.stringify(metrics,null,2));console.log(metrics);
+}finally{await browser.close();}

@@ -1,7 +1,7 @@
 import {build} from 'esbuild';
 import {readFileSync,mkdirSync,cpSync} from 'node:fs';
-const files={'/':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
-const assets=Object.fromEntries(Object.entries(files).map(([url,[file,type]])=>[url,{body:readFileSync('public/'+file,'utf8'),type}]));
+const files={'/':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8'],'/scene.js':['scene.js','text/javascript; charset=utf-8'],'/world-map.js':['world-map.js','text/javascript; charset=utf-8'],'/realtime.js':['realtime.js','text/javascript; charset=utf-8'],'/assets/world.png':['assets/world.png','image/png'],'/assets/characters.png':['assets/characters.png','image/png'],'/assets/LICENSE-world.txt':['assets/LICENSE-world.txt','text/plain; charset=utf-8'],'/assets/LICENSE-characters.txt':['assets/LICENSE-characters.txt','text/plain; charset=utf-8']};
+const assets=Object.fromEntries(Object.entries(files).map(([url,[file,type]])=>[url,{body:readFileSync('public/'+file,type==='image/png'?'base64':'utf8'),type,base64:type==='image/png'}]));
 await build({entryPoints:['server/worker.mjs'],bundle:true,format:'esm',platform:'browser',target:'es2022',outfile:'dist/server/index.js',plugins:[{name:'assets',setup(b){b.onResolve({filter:/^virtual:assets$/},()=>({path:'assets',namespace:'inline'}));b.onLoad({filter:/.*/,namespace:'inline'},()=>({contents:'export default '+JSON.stringify(assets),loader:'js'}));}}]});
 mkdirSync('dist/.openai',{recursive:true});cpSync('.openai/hosting.json','dist/.openai/hosting.json');cpSync('drizzle','dist/.openai/drizzle',{recursive:true});
 console.log('Sites Worker + embedded static assets + D1 migrations built.');

@@ -2,6 +2,8 @@ import {createRoom,join,act,view,RuleError} from './game.mjs';
 import {config,askAI} from './ai.mjs';
 import {botTarget,prepareBotTurn,askBot} from './bots.mjs';
 import assets from 'virtual:assets';
+import {worldState,moveWorld,validateSpatialAction,placeBot} from './world.mjs';
+import {EVIDENCE_SPOTS,spawn,privateScene} from '../public/world-map.js';
 class Fault extends Error {constructor(message,status=400){super(message);this.status=status;}}
 const fail=(message,status)=>{throw new Fault(message,status);};
 const json=(body,status=200,extra={})=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...extra}});
@@ -14,11 +16,23 @@ async function room(db,code,id){if(typeof code!=='string'||! /^[A-F0-9]{6}$/.tes
 async function save(db,r,rev,{message,seat}={}){r.revision=rev+1;
  const keys=Object.keys(r.requests);for(const k of keys.slice(0,Math.max(0,keys.length-512)))delete r.requests[k];
  const stored={...r,messages:[]};const statements=[db.prepare('UPDATE rooms SET body=?,revision=?,host=?,phase=? WHERE code=? AND revision=?').bind(JSON.stringify(stored),r.revision,r.host,r.phase,r.code,rev)];
- if(message)statements.push(db.prepare('INSERT INTO messages(id,room,sender,recipient,body,at) SELECT ?,?,?,?,?,? WHERE changes()=1').bind(message.id,r.code,message.from,message.to,message.text,message.at));
+ if(message)statements.push(db.prepare('INSERT INTO messages(id,room,sender,recipient,body,at,scene) SELECT ?,?,?,?,?,?,? WHERE changes()=1').bind(message.id,r.code,message.from,message.to,message.text,message.at,message.scene||'hall'));
  if(seat)statements.push(db.prepare('INSERT INTO seats(room,player,seen) SELECT ?,?,? WHERE changes()=1 ON CONFLICT(room,player) DO UPDATE SET seen=excluded.seen').bind(r.code,seat,Date.now()));
  return (await db.batch(statements))[0].meta.changes===1;}
-async function chatRows(db,code,id,{before=null}={}){const params=[code,id,id];const n=(await db.prepare('SELECT count(*) AS n FROM messages WHERE room=? AND (recipient IS NULL OR recipient=? OR sender=?)').bind(...params).first()).n;const end=before===null?n:Math.min(before,n),start=Math.max(0,end-100);const rows=(await db.prepare('SELECT id,sender AS "from",recipient AS "to",body AS text,at FROM messages WHERE room=? AND (recipient IS NULL OR recipient=? OR sender=?) ORDER BY rowid LIMIT ? OFFSET ?').bind(...params,end-start,start).all()).results;return {messages:rows,messageCount:n,before:start};}
-async function state(db,r,id,cfg){const rows=(await db.prepare('SELECT player,seen FROM seats WHERE room=?').bind(r.code).all()).results;const now=Date.now(),hostSeen=rows.find(p=>p.player===r.host)?.seen||r.createdAt;return {...view(r,id,rows.filter(p=>now-p.seen<20000).map(p=>p.player)),...await chatRows(db,r.code,id),ai:{configured:Boolean(cfg.key),model:cfg.model,remaining:Math.max(0,cfg.budget-r.aiCount)},hostAbsentSince:now-hostSeen>=20000?hostSeen:null};}
+async function chatRows(db,code,id,{before=null,scene=null}={}){
+ const filter='room=? AND (recipient IS NULL OR recipient=? OR sender=?)'+(scene?' AND scene=?':'');
+ const params=[code,id,id,...(scene?[scene]:[])];
+ const n=(await db.prepare('SELECT count(*) AS n FROM messages WHERE '+filter).bind(...params).first()).n;
+ const end=before===null?n:Math.min(before,n),start=Math.max(0,end-100);
+ const rows=(await db.prepare('SELECT id,sender AS "from",recipient AS "to",body AS text,at,scene FROM messages WHERE '+filter+' ORDER BY rowid LIMIT ? OFFSET ?').bind(...params,end-start,start).all()).results;
+ return {messages:rows,messageCount:n,before:start};
+}
+async function state(db,r,id,cfg){
+ const rows=(await db.prepare('SELECT player,seen FROM seats WHERE room=?').bind(r.code).all()).results;
+ const now=Date.now(),hostSeen=rows.find(p=>p.player===r.host)?.seen||r.createdAt,world=await worldState(db,r),scene=world.players.find(p=>p.id===id).scene;
+ const signals=(await db.prepare('SELECT sender,body,at FROM signals WHERE room=? AND recipient=? AND at>?').bind(r.code,id,now-60000).all()).results;
+ return {...view(r,id,rows.filter(p=>now-p.seen<20000).map(p=>p.player)),...await chatRows(db,r.code,id,{scene}),world,chatScene:scene,signals:signals.map(s=>({...JSON.parse(s.body),sender:s.sender,at:s.at})),ai:{configured:Boolean(cfg.key),model:cfg.model,remaining:Math.max(0,cfg.budget-r.aiCount)},hostAbsentSince:now-hostSeen>=20000?hostSeen:null};
+}
 async function runBot(db,r,id,data,bot,cfg){
  const {type,payload,requestId}=data,key=id+':'+requestId,turn=type==='botTurn';
  if(r.phase===0||r.phase===8||r.paused)fail('AI 玩家在开局后、未暂停时参与对话和行动');
@@ -37,7 +51,7 @@ async function runBot(db,r,id,data,bot,cfg){
  const planned=turn?prepareBotTurn(r,bot.id):r;
  const snapshot=view(planned,bot.id);
  try{
-  const history=(await chatRows(db,r.code,bot.id)).messages;
+  const history=(await chatRows(db,r.code,bot.id,{scene:payload.scene||null})).messages;
   answer=await askBot(snapshot,history,{turn,question:payload.text,privateTo:payload.to?id:null},cfg);
  }catch{botError='AI 玩家暂时无法回复，本幕未自动完成；请稍后重试。';}
  for(let attempt=0;attempt<5;attempt++){
@@ -54,20 +68,22 @@ async function runBot(db,r,id,data,bot,cfg){
      else act(updated,bot.id,'ready',{value:true});
     }
     if((await db.prepare('SELECT count(*) AS n FROM messages WHERE room=?').bind(r.code).first()).n>=5000)throw new RuleError('本局消息上限已到达');
-    act(updated,bot.id,'chat',{text:turn&&phase===7?'我已提交秘密指控，结案后再说明我的选择。':answer.text,to:turn?null:payload.to?id:null});
+    if(!turn){const w=await worldState(db,current);if(w.players.find(p=>p.id===id).scene!==payload.scene||w.players.find(p=>p.id===bot.id).scene!==payload.scene)throw new RuleError('会话场景已改变');}
+    const destination=turn?(EVIDENCE_SPOTS[updated.players.find(p=>p.id===bot.id).clues.findLast(c=>!current.players.find(p=>p.id===bot.id).clues.includes(c))]||spawn(phase)):null;
+    act(updated,bot.id,'chat',{scene:payload.scene||destination.scene,text:turn&&phase===7?'我已提交秘密指控，结案后再说明我的选择。':answer.text,to:turn?null:payload.to?id:null});
     message=updated.messages.at(-1);
    }catch{updated=current;message=undefined;botError='AI 行动未通过当前规则检查，本幕未完成；请重试。';}
   }
   updated.players.find(q=>q.id===bot.id).botTask=null;
   updated.requests[key]={bot:true,status:botError?'failed':'done',...(botError?{botError}:{})};
-  if(await save(db,updated,revision,{message}))return json({type:'ack',requestId,botError,state:await state(db,updated,id,cfg)});
+  if(await save(db,updated,revision,{message})){if(turn&&!botError){const before=current.players.find(p=>p.id===bot.id).clues,after=updated.players.find(p=>p.id===bot.id).clues,spot=EVIDENCE_SPOTS[after.findLast(c=>!before.includes(c))]||spawn(phase);await placeBot(db,updated,bot.id,spot.scene,spot.x,spot.y);}return json({type:'ack',requestId,botError,state:await state(db,updated,id,cfg)});}
  }
  return json({type:'ack',requestId,botError:'房间更新频繁，回复未保存；请稍后检查状态再重试。',state:await state(db,await room(db,r.code,id),id,cfg)});
 }
 async function handle(req,env){
  const url=new URL(req.url),path=url.pathname,db=env.DB;
- if(req.method==='GET'&&Object.hasOwn(assets,path)){const a=assets[path];return new Response(a.body,{headers:{'Content-Type':a.type,'Cache-Control':'no-cache'}});}
- if(path==='/health'&&req.method==='GET'){await db.prepare('SELECT code FROM rooms LIMIT 1').all();return json({ok:true,transport:'http-poll',pollMs:800});}
+ if(req.method==='GET'&&Object.hasOwn(assets,path)){const a=assets[path];return new Response(a.base64?Uint8Array.from(atob(a.body),c=>c.charCodeAt(0)):a.body,{headers:{'Content-Type':a.type,'Cache-Control':'no-cache'}});}
+ if(path==='/health'&&req.method==='GET'){await db.prepare('SELECT code FROM rooms LIMIT 1').all();return json({ok:true,transport:'webrtc+http',pollMs:450,worldVersion:1});}
  if(!path.startsWith('/api/'))return json({error:'不存在'},404);
  if(!['GET','POST'].includes(req.method))return json({error:'请求方式不支持'},405);
  if(req.method==='POST'&&req.headers.get('origin')!==(env.PUBLIC_ORIGIN||url.origin))fail('请求来源不允许',403);
@@ -85,12 +101,24 @@ async function handle(req,env){
  if(!id)fail('身份已过期，请刷新建立身份',401);
  if(req.method==='GET'&&path==='/api/state'){
   const r=await room(db,url.searchParams.get('room'),id);
-  // ponytail: periodic snapshots suit four-player turn-based rooms; use a supported room actor if action-game latency is required.
   await db.prepare('UPDATE seats SET seen=? WHERE room=? AND player=? AND seen<?').bind(Date.now(),r.code,id,Date.now()-5000).run();
+  await db.prepare('UPDATE positions SET seen=? WHERE room=? AND player=? AND phase=? AND seen>? AND seen<?').bind(Date.now(),r.code,id,r.phase,Date.now()-20000,Date.now()-5000).run();
   return json({type:'state',state:await state(db,r,id,cfg)});
  }
  if(req.method!=='POST')return json({error:'不存在'},404);
- await limit(db,'action:'+id,180);const data=await readBody(req);
+ const data=await readBody(req);
+ if(path==='/api/world'){
+  await limit(db,'movement:'+id,360);const r=await room(db,data.room,id);
+  return json({world:await moveWorld(db,r,id,data)});
+ }
+ if(path==='/api/signal'){
+  await limit(db,'signal:'+id,60);const r=await room(db,data.room,id);
+  if(!r.players.some(p=>p.id===data.to&&!p.bot&&p.id!==id))fail('信令接收者无效',403);
+  const d=data.description;if(!d||!['offer','answer'].includes(d.type)||typeof d.sdp!=='string'||d.sdp.length>12000||typeof data.epoch!=='string'||data.epoch.length>80)fail('无效连接信令');
+  const body=JSON.stringify({description:{type:d.type,sdp:d.sdp},epoch:data.epoch});
+  await db.prepare('INSERT INTO signals(room,sender,recipient,body,at) VALUES(?,?,?,?,?) ON CONFLICT(room,sender,recipient) DO UPDATE SET body=excluded.body,at=excluded.at').bind(r.code,id,data.to,body,Date.now()).run();return json({ok:true});
+ }
+ await limit(db,'action:'+id,180);
  if(path==='/api/create'){
   if((await db.prepare('SELECT count(*) AS n FROM rooms WHERE host=? AND phase<8').bind(id).first()).n>=5)fail('最多创建五个未结束的房间');
   if((await db.prepare('SELECT count(*) AS n FROM rooms').first()).n>=200)fail('服务房间上限已到达');
@@ -108,12 +136,14 @@ async function handle(req,env){
  const {type,requestId,payload={}}=data;if(typeof type!=='string'||typeof requestId!=='string'||! /^[\w-]{8,80}$/.test(requestId))fail('无效操作');
  let r=await room(db,data.room,id);const key=id+':'+requestId;
  if(r.requests[key]?.bot)return json({type:'ack',requestId,duplicate:true,botError:r.requests[key].botError,state:await state(db,r,id,cfg)});
- if(type==='history'){if(!Number.isInteger(payload?.before)||payload.before<0)fail('分页参数无效');return json({type:'history',requestId,...await chatRows(db,r.code,id,{before:payload.before})});}
+ if(type==='history'){if(!Number.isInteger(payload?.before)||payload.before<0)fail('分页参数无效');return json({type:'history',requestId,...await chatRows(db,r.code,id,{before:payload.before,scene:(await worldState(db,r)).players.find(p=>p.id===id).scene})});}
  if(r.requests[key]){const cached=r.players.find(p=>p.id===id).lastAI;return json({...(cached?.requestId===requestId?cached.answer?{type:'ai',...(cached.phase===r.phase?cached.answer:{mode:'rules',text:'阶段已变化，请根据当前材料重新提问。'})}:{type:'ai',mode:'rules',text:cached.until>Date.now()?'主持仍在处理中，请稍后重试。':'上次主持回复未完成，请重新提问。'}:{type:'ack'}),requestId,duplicate:true,state:await state(db,r,id,cfg)});}
  if(data.expectedRevision!==r.revision)return json({type:'error',requestId,message:'房间状态已更新，请确认后重试',state:await state(db,r,id,cfg)},409);
  if(!payload||typeof payload!=='object'||Array.isArray(payload))fail('无效操作参数');
+ const spatial=await validateSpatialAction(db,r,id,type,payload);
  const bot=type==='botTurn'?r.players.find(p=>p.bot&&p.id===payload.playerId):type==='chat'?botTarget(r,payload):null;
  if(type==='botTurn'&&!bot)fail('AI 玩家不存在');
+ if(bot&&type==='chat'&&spatial.world.players.find(p=>p.id===bot.id).scene!==spatial.position.scene)fail('这位 AI 不在当前场景，可以在同一场景 @ 或邀请到会客室');
  if(bot)return runBot(db,r,id,data,bot,cfg);
  if(type==='chat'&&(await db.prepare('SELECT count(*) AS n FROM messages WHERE room=?').bind(r.code).first()).n>=5000)fail('本局消息上限已到达');
  const revision=r.revision;

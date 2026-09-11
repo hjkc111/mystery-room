@@ -4,7 +4,7 @@
 
 | 请求 | 输入/返回 |
 |---|---|
-| GET /health | D1连接检查、transport=http-poll、pollMs=800 |
+| GET /health | D1连接检查、transport=webrtc+http、pollMs=450、worldVersion=1 |
 | GET /api/session | 当前身份及曾加入房间列表 |
 | POST /api/session | `{}`，创建随机身份和30天Cookie |
 | POST /api/create | `{ "name": "玩家" }` → 六位code |
@@ -48,3 +48,11 @@
 - limits：key主键、count、until；用于会话建立及操作限频。
 
 SQL参数全部通过绑定传入。schema和追加迁移分别见db/schema.ts与drizzle目录。本地与生产各有独立数据库，旧Node SQLite不自动导入。
+
+## 场景接口
+
+- `POST /api/world`：`room, phase, seq, type`；`type=move` 携带最多 30 个 `{x,y}` 路径点；`type=door` 携带门 `target`；`type=inviteBot` 携带 AI `playerId`。返回权威 world。成员身份取 Cookie，seq 必须严格递增。移动限流 360 次/分钟。
+- `POST /api/signal`：`room,to,epoch,description:{type,sdp}`。收件人必须同房间真人，发件人取 Cookie；SDP 最多 12000 字符、epoch 最多 80 字符；限流 60 次/分钟。状态仅返回当前收件人 60 秒内的信令。
+- `state.world.players`：成员 id、scene、x/y、phase、seq、seen；`chatScene` 决定聊天与历史范围。
+- `investigate` 新增当前场景与 56 像素距离校验；`chat` 在普通场景拒绝 to，在双人会客室自动绑定同室收件人。
+- 新增 positions 复合主键 room/player、signals 复合主键 room/sender/recipient；messages 增加 scene，旧消息默认 hall。

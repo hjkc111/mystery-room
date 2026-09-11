@@ -2,13 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {runtime} from '../tools/runtime.mjs';
 import '../tools/build.mjs';
+import {EVIDENCE_SPOTS} from '../public/world-map.js';
+import {placeBot} from '../server/world.mjs';
 
 test('Sites Worker + actual local D1: complete game, concurrency, privacy, replay and persistence',async()=>{
  let {mf,db}=await runtime();const origin='http://localhost';let users=[];
  async function call(path,data,cookie){const res=await mf.dispatchFetch(origin+path,{method:data===undefined?'GET':'POST',headers:{origin,...(cookie?{cookie}:{}),'Content-Type':'application/json'},...(data===undefined?{}:{body:JSON.stringify(data)})});return {status:res.status,data:await res.json(),res};}
  async function refresh(u){const result=await call('/api/state?room='+u.code,undefined,u.cookie);assert.equal(result.status,200);u.state=result.data.state;return u.state;}
  async function action(u,type,payload={},overrides={}){await refresh(u);const result=await call('/api/action',{room:u.code,type,payload,requestId:crypto.randomUUID(),expectedRevision:u.state.revision,...overrides},u.cookie);if(result.data.state)u.state=result.data.state;return result;}
- async function ok(u,type,payload,overrides){const r=await action(u,type,payload,overrides);assert.equal(r.status,200,JSON.stringify(r.data));return r.data;}
+ async function ok(u,type,payload,overrides){if(type==='investigate'){const spot=EVIDENCE_SPOTS[payload.targetId];await refresh(u);await placeBot(db,{code:u.code,phase:u.state.phase},u.id,spot.scene,spot.x,spot.y);}const r=await action(u,type,payload,overrides);assert.equal(r.status,200,JSON.stringify(r.data));return r.data;}
  async function next(){for(const u of users)await ok(u,'ready',{});await ok(users[0],'advance');for(const u of users)await refresh(u);}
  try{
   for(let i=0;i<5;i++){const r=await call('/api/session',{});assert.equal(r.status,200);users.push({id:r.data.id,cookie:r.res.headers.get('set-cookie').split(';')[0]});}
@@ -22,7 +24,7 @@ test('Sites Worker + actual local D1: complete game, concurrency, privacy, repla
   await refresh(users[0]);const rev=users[0].state.revision;
   const raced=await Promise.all(users.slice(0,2).map(u=>call('/api/action',{room:code,type:'chat',payload:{text:'raced'},requestId:crypto.randomUUID(),expectedRevision:rev},u.cookie)));assert.deepEqual(raced.map(x=>x.status).sort(),[200,409]);
   const requestId=crypto.randomUUID();await ok(users[0],'chat',{text:'ONCE'},{requestId});assert.equal((await ok(users[0],'chat',{text:'ONCE'},{requestId})).duplicate,true);
-  await ok(users[0],'chat',{text:'PRIVATE',to:users[1].id});await refresh(users[1]);await refresh(users[2]);assert.ok(users[1].state.messages.some(m=>m.text==='PRIVATE'));assert.ok(!users[2].state.messages.some(m=>m.text==='PRIVATE'));assert.equal(users[0].state.messages.filter(m=>m.text==='ONCE').length,1);
+  assert.equal((await action(users[0],'chat',{text:'PRIVATE',to:users[1].id})).status,400);
   await ok(users[0],'note',{text:'PRIVATE_NOTE'});await next();assert.equal(users[0].state.phase,1);
   const aiId=crypto.randomUUID();const answer=await ok(users[1],'askAI',{question:'怎么开始'},{requestId:aiId});assert.equal(answer.mode,'rules');const again=await ok(users[1],'askAI',{question:'怎么开始'},{requestId:aiId});assert.equal(again.text,answer.text);assert.equal(again.state.ai.remaining,79);
   await next();await next();const privateIds=['turner-pocket','james-letter','alice-letter','william-note'];

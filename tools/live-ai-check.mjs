@@ -9,7 +9,7 @@ try{
  for(let i=0;i<4;i++){await pages[i].locator('#roles article').nth(i).getByRole('button',{name:'选择这个角色',exact:true}).click();await pages[i].waitForFunction(i=>document.querySelectorAll('#roles article')[i].querySelector('button').textContent.includes('已选择'),i);}
  for(const p of pages){await p.locator('#ready').click();await p.locator('#ready').filter({hasText:'取消准备'}).waitFor();}
  await pages[0].locator('#advance').click();await pages[1].waitForFunction(()=>document.querySelector('#phases .current')?.textContent.startsWith('2 '));
- const p=pages[1];assert.match(await p.locator('#aiStatus').innerText(),/已配置/);await p.locator('#question').fill('我们刚进入角色阅读阶段，请用两句话告诉我接下来怎么参与，不要推理凶手。');const started=Date.now();
+ const p=pages[1];await p.locator('.tool-panel:not([hidden]) .panel-close').click();await p.locator('[data-panel=hostPanel]').click();assert.match(await p.locator('#aiStatus').innerText(),/已配置/);await p.locator('#question').fill('我们刚进入角色阅读阶段，请用两句话告诉我接下来怎么参与，不要推理凶手。');const started=Date.now();
  const response=p.waitForResponse(r=>r.url().endsWith('/api/action')&&r.request().postDataJSON()?.type==='askAI'&&r.status()===200);
  await p.locator('#ask').click();const result=await(await response).json();await p.locator('.ai-answer').waitFor();assert.equal(result.mode,'ai');assert.ok(result.text.length>10);assert.match(await p.locator('.ai-answer .tag').innerText(),/AI 主持回复/);
  console.log(JSON.stringify({passed:true,mode:result.mode,model:result.model,reply:result.text,elapsedMs:Date.now()-started}));

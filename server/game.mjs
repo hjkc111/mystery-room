@@ -101,7 +101,7 @@ export function act(r,id,type,payload={}) {
     const to=payload.to?member(r,payload.to).id:null;
     if(to===id) fail('不能私聊自己');
     if(r.messages.length>=5000) fail('本局消息上限已到达');
-    r.messages.push({id:crypto.randomUUID(),from:id,to,text:body,at:Date.now()});
+    r.messages.push({id:crypto.randomUUID(),from:id,to,text:body,scene:payload.scene||'hall',at:Date.now()});
   } else if(type==='note') {p.note=typeof payload.text==='string' && payload.text.length<=5000 ? payload.text : fail('笔记超长');
   } else if(type==='vote') {
     if(r.phase!==7 || (r.deadline && Date.now()>=r.deadline)) fail('不在投票开放时间');
