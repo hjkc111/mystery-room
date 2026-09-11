@@ -1,0 +1,24 @@
+{
+  "name": "friends-mystery-room",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env tools/dev.mjs",
+    "dev": "npm start",
+    "build": "node tools/check.mjs && node tools/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node tools/browser-check.mjs",
+    "db:generate": "drizzle-kit generate"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "esbuild": "^0.28.2",
+    "miniflare": "4.20260730.0",
+    "playwright": "^1.63.0"
+  }
+}

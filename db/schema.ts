@@ -1,0 +1,6 @@
+import {sqliteTable,text,integer,index,primaryKey} from 'drizzle-orm/sqlite-core';
+export const rooms=sqliteTable('rooms',{code:text('code').primaryKey(),revision:integer('revision').notNull(),body:text('body').notNull(),host:text('host').notNull(),phase:integer('phase').notNull()});
+export const sessions=sqliteTable('sessions',{hash:text('hash').primaryKey(),id:text('id').notNull(),created:integer('created').notNull()});
+export const seats=sqliteTable('seats',{room:text('room').notNull(),player:text('player').notNull(),seen:integer('seen').notNull()},t=>[primaryKey({columns:[t.room,t.player]}),index('seats_player').on(t.player)]);
+export const limits=sqliteTable('limits',{key:text('key').primaryKey(),count:integer('count').notNull(),until:integer('until').notNull()});
+export const messages=sqliteTable('messages',{id:text('id').primaryKey(),room:text('room').notNull(),sender:text('sender').notNull(),recipient:text('recipient'),body:text('body').notNull(),at:integer('at').notNull()},t=>[index('messages_room').on(t.room)]);
