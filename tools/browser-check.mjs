@@ -10,7 +10,7 @@ try {
  await pages[0].locator('#create').click();await pages[0].locator('#connection').filter({hasText:'已连接 · 自动同步'}).waitFor();const code=await pages[0].locator('#roomCode').textContent();
  for(let i=1;i<4;i++){await pages[i].locator('#code').fill(code);await pages[i].locator('#joinForm button').click();await pages[i].locator('#connection').filter({hasText:'已连接 · 自动同步'}).waitFor();}
  async function idle(){await new Promise(r=>setTimeout(r,1100));}
- for(let i=0;i<4;i++){await pages[i].locator('#roles article').nth(i).locator('button').click();await pages[i].waitForFunction(i=>document.querySelectorAll('#roles article')[i].querySelector('button').textContent.includes('已选择'),i);}
+ for(let i=0;i<4;i++){await pages[i].locator('#roles article').nth(i).getByRole('button',{name:'选择这个角色',exact:true}).click();await pages[i].waitForFunction(i=>document.querySelectorAll('#roles article')[i].querySelector('button').textContent.includes('已选择'),i);}
  let phase=0;async function next(){for(const p of pages){await p.locator('#ready').click();await p.locator('#ready').filter({hasText:'取消准备'}).waitFor();}await pages[0].locator('#advance').click();phase++;for(const p of pages)await p.waitForFunction(phase=>document.querySelector('#phases .current')?.textContent.startsWith((phase+1)+' '),phase);}
  await next();for(const p of pages)assert.equal(await p.locator('#chapters article').count(),1);
  await pages[1].locator('#question').fill('现在怎么进行？');await pages[1].locator('#ask').click();await pages[1].locator('.ai-answer').waitFor();assert.match(await pages[1].locator('.ai-answer').innerText(),/规则主持/);
