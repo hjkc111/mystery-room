@@ -10,14 +10,16 @@ export async function worldState(db,r){
 export async function moveWorld(db,r,id,data){
  const world=await worldState(db,r),p=world.players.find(p=>p.id===id);if(data.phase!==r.phase)reject('阶段已更新，请等待场景切换');
  if(r.paused)reject('游戏已暂停');
- let next={...p},seq=data.seq,actor=id;
+ let next={...p},seq=data.seq,actor=id,priorSeq=p.seq,credit=SPEED*2;const now=Date.now();
  if(!Number.isSafeInteger(seq)||seq<=p.seq)reject('移动序号已过期');
  if(data.type==='move'){
   if(!Array.isArray(data.path)||!data.path.length||data.path.length>30)reject('无效移动轨迹');
   let length=0;
   for(const point of data.path){if(!point||!walkable(p.scene,point.x,point.y)||!clearPath(p.scene,next,point))reject('不能穿过墙壁或场景边界');length+=distance(next,point);next.x=point.x;next.y=point.y;}
-  const elapsed=Math.min(2000,Math.max(100,Date.now()-(p.seen||Date.now()-500)));
-  if(length>SPEED*elapsed/1000+24)reject('移动过快，请等待位置同步');
+  // A bounded distance budget tolerates request bunching without granting free distance per request.
+  const row=await db.prepare('SELECT phase,seen,credit,moved_at FROM positions WHERE room=? AND player=?').bind(r.code,id).first();
+  if(row&&row.phase===r.phase&&now-row.seen<20000)credit=Math.min(SPEED*2,row.credit+Math.max(0,now-row.moved_at)*SPEED/1000);
+  if(length>credit)reject('移动过快，请等待位置同步');credit-=length;
  }else if(data.type==='door'){
   const door=SCENES[p.scene].doors.find(d=>d.id===data.target&&allowedScenes(r.phase).includes(d.to));
   if(!door||distance(p,door)>REACH)reject('请走近本阶段开放的门再按空格');
@@ -27,13 +29,13 @@ export async function moveWorld(db,r,id,data){
   const bot=r.players.find(q=>q.id===data.playerId&&q.bot);if(!bot)reject('AI 玩家不存在');
   const bp=world.players.find(q=>q.id===bot.id);
   if(privateScene(bp.scene)&&bp.scene!==p.scene&&world.players.some(q=>q.id!==bot.id&&q.scene===bp.scene))reject('这位 AI 正在另一间会客室，请稍后邀请');
-  actor=bot.id;seq=bp.seq+1;next={...bp,scene:p.scene,x:p.x+40,y:p.y};if(!walkable(next.scene,next.x,next.y))next.x=p.x-40;
+  actor=bot.id;priorSeq=bp.seq;seq=bp.seq+1;next={...bp,scene:p.scene,x:p.x+40,y:p.y};if(!walkable(next.scene,next.x,next.y))next.x=p.x-40;
  }else reject('未知空间操作');
- const now=Date.now(),capacity=privateScene(next.scene)?2:99;
- const result=await db.prepare(`INSERT INTO positions(room,player,phase,scene,x,y,seen,seq)
- SELECT ?,?,?,?,?,?,?,? WHERE (SELECT phase FROM rooms WHERE code=?)=?
+ const capacity=privateScene(next.scene)?2:99;
+ const result=await db.prepare(`INSERT INTO positions(room,player,phase,scene,x,y,seen,seq,credit,moved_at)
+ SELECT ?,?,?,?,?,?,?,?,?,? WHERE (SELECT phase FROM rooms WHERE code=?)=?
  AND (SELECT count(*) FROM positions WHERE room=? AND phase=? AND scene=? AND player<>? AND (seen>? OR player LIKE 'bot-%'))<?
- ON CONFLICT(room,player) DO UPDATE SET phase=excluded.phase,scene=excluded.scene,x=excluded.x,y=excluded.y,seen=excluded.seen,seq=excluded.seq WHERE positions.seq<excluded.seq`).bind(r.code,actor,r.phase,next.scene,next.x,next.y,now,seq,r.code,r.phase,r.code,r.phase,next.scene,actor,now-20000,capacity).run();
+ ON CONFLICT(room,player) DO UPDATE SET phase=excluded.phase,scene=excluded.scene,x=excluded.x,y=excluded.y,seen=excluded.seen,seq=excluded.seq,credit=excluded.credit,moved_at=excluded.moved_at WHERE positions.seq=?`).bind(r.code,actor,r.phase,next.scene,next.x,next.y,now,seq,credit,now,r.code,r.phase,r.code,r.phase,next.scene,actor,now-20000,capacity,priorSeq).run();
  if(!result.meta.changes)reject('房间已满或位置已更新，请重新同步');
  return worldState(db,r);
 }
@@ -55,5 +57,5 @@ export async function validateSpatialAction(db,r,id,type,payload){
 }
 export async function placeBot(db,r,id,scene,x,y){
  await db.prepare(`INSERT INTO positions(room,player,phase,scene,x,y,seen,seq) VALUES(?,?,?,?,?,?,?,1)
- ON CONFLICT(room,player) DO UPDATE SET phase=excluded.phase,scene=excluded.scene,x=excluded.x,y=excluded.y,seen=excluded.seen,seq=positions.seq+1`).bind(r.code,id,r.phase,scene,x,y,Date.now()).run();
+ ON CONFLICT(room,player) DO UPDATE SET phase=excluded.phase,scene=excluded.scene,x=excluded.x,y=excluded.y,seen=excluded.seen,seq=positions.seq+1,credit=320,moved_at=0`).bind(r.code,id,r.phase,scene,x,y,Date.now()).run();
 }

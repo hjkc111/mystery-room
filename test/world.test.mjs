@@ -24,9 +24,14 @@ test('D1 spatial authority: paths, speed, phase, capacity race, proximity and pr
  await assert.rejects(validateSpatialAction(db,r,'a','investigate',{targetId:'weapon'}),/证据旁/);
  assert.equal(r.players[0].clues.length,0);
  await move('a',{type:'move',path:[{x:340,y:368}]});
+ // Responses may arrive together after network delay; they share one finite distance budget.
+ await move('a',{seq:2,type:'move',path:[{x:440,y:368}]});await move('a',{seq:3,type:'move',path:[{x:540,y:368}]});
+ await db.prepare('UPDATE positions SET credit=0,moved_at=? WHERE room=? AND player=?').bind(Date.now()+10000,r.code,'a').run();
+ await assert.rejects(move('a',{seq:4,type:'move',path:[{x:700,y:368}]}),/移动过快/);
+
  await assert.rejects(move('a',{type:'move',path:[{x:341,y:368}]}),/序号/);
  for(const id of ['a','b','c'])await placeBot(db,r,id,'hall',48,144);
- const outcomes=await Promise.allSettled(['a','b','c'].map(id=>move(id,{type:'door',target:'meeting-a',seq:3})));
+ const outcomes=await Promise.allSettled(['a','b','c'].map(id=>move(id,{type:'door',target:'meeting-a',seq:10})));
  assert.equal(outcomes.filter(x=>x.status==='fulfilled').length,2);
  const world=await worldState(db,r),inside=world.players.filter(p=>p.scene==='meeting-a'),outside=world.players.find(p=>p.scene!=='meeting-a');
  const payload={text:'secret'};await validateSpatialAction(db,r,inside[0].id,'chat',payload);assert.equal(payload.to,inside[1].id);assert.equal(payload.scene,'meeting-a');
