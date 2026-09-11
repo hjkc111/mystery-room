@@ -1,6 +1,6 @@
 # 部署与配置
 
-目标是由 Sites 一起发布网页和 Cloudflare Worker API，D1 保存房间。部署实施中，最终 URL、绑定和执行结果见[实现状态](implementation-status.md)。
+目标是由 Sites 一起发布网页和 Cloudflare Worker API，D1 保存房间。已发布：[https://valley-mystery-friends.hjkc20050804.chatgpt.site](https://valley-mystery-friends.hjkc20050804.chatgpt.site)。绑定和执行结果见[实现状态](implementation-status.md)。
 
 ## 开发准备
 
@@ -10,7 +10,7 @@ npm test
 npm run build
 ```
 
-以最终 `package.json` 为准，当前版本需要重新执行验证。只发布 `public/` 会丢失会话、规则、数据库和 AI API，不是完整游戏。
+以最终 `package.json` 为准，当前版本已完成构建与测试。只发布 `public/` 会丢失会话、规则、数据库和 AI API，不是完整游戏。
 
 ## AI 服务端配置
 

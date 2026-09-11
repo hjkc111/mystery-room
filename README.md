@@ -1,8 +1,10 @@
 # 溪谷里的最后一声 · 四人朋友局
 
+[打开游戏](https://valley-mystery-friends.hjkc20050804.chatgpt.site) · [GitHub自动测试](https://github.com/hjkc111/mystery-room/actions)
+
 给四位朋友一起玩的网页剧本杀初版：各自读本、两轮搜证、公聊与私聊、最终陈述、秘密指控和真相复盘。房主也是玩家；规则主持负责流程，可选接入 AI 辅助回答问题。
 
-**已重构为 Cloudflare Worker + D1，使用 Sites 发布。Worker/D1 自动化11项通过；部署结果与浏览器验收见[实现状态](docs/implementation-status.md)。**
+**已重构为 Cloudflare Worker + D1，使用 Sites 发布。Worker/D1 自动化11项通过，Sites公网四人完整流程通过，GitHub Actions通过；详细验收见[实现状态](docs/implementation-status.md)。**
 
 这是根据柯南·道尔公有领域原作重新创作的四人改编测试本，不是已获高分的商业剧本。45–65 分钟是设计估计，尚未完成四名真人完整盲测。
 
@@ -38,6 +40,7 @@ npm run test:browser
 本地预览为 http://localhost:4318 ，需要Node 24及Chrome。首次依赖安装后若没有Chrome可运行 `npx playwright install chrome`。公网服务是 Worker + D1，不要照历史文档启动常驻 Node/ws，也不能只上传 `public/` 作为完整游戏。
 
 - [架构与同步](docs/architecture.md)
+- [API与数据说明](docs/api-and-data.md)
 - [规则与信息矩阵](docs/rules-and-information.md)
 - [部署与配置](docs/deployment.md)
 - [实现状态](docs/implementation-status.md)
