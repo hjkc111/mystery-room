@@ -23,9 +23,11 @@
 
 浏览器约每 **800 ms** 请求 `/api/state`，操作发送到 `/api/action`。服务器校验身份和阶段，通过版本比较和请求去重保存 D1 状态。适合文字朋友局；这不是 WebSocket 推送或毫秒级动作游戏同步，实际延迟还包括网络与请求耗时。
 
-AI 默认 `deepseek-flash`，可配置兼容 Chat Completions 的服务；密钥只在服务端设置。AI 只接收提问者当前材料，不改游戏事实。无 Key 或接口失败时回退规则主持，不阻止搜证和结算。真实 DeepSeek 请求尚未验证。
+AI 默认 `deepseek-flash`，可配置兼容 Chat Completions 的服务；密钥只在服务端设置。AI 只接收提问者当前材料，不改游戏事实。无 Key 或接口失败时回退规则主持，不阻止搜证和结算。真实 DeepSeek 与公网“问主持”已实测通过，见[接口型号与验收记录](docs/deepseek-verification.md)。
 
 ## 开发与文档
+
+这是JavaScript项目，不需要Python的requirements.txt。依赖清单在package.json，锁定版本在package-lock.json，使用npm ci安装。
 
 ```sh
 npm ci

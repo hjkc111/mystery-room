@@ -12,7 +12,7 @@
 | Cookie身份、来源检查、私密过滤 | 回归通过 |
 | Worker冷启动与房主接管 | 新实例恢复、活动时间与接管测试通过 |
 | AI材料裁剪、规则回退 | Worker规则回退及Mock协议通过 |
-| 真实DeepSeek | 未验证，没有真实Key |
+| 真实DeepSeek | HTTP200；公网问主持返回mode=ai，详见deepseek-verification.md |
 | Sites公网入口 | [已发布](https://valley-mystery-friends.hjkc20050804.chatgpt.site)，公网4人9阶段完整回归通过 |
 | GitHub hjkc111/mystery-room | 已提交推送，Actions通过，公开源码含剧透 |
 | Worker自动化与四浏览器全流程 | 11/11通过，4人9阶段，0页面错误，390px无溢出 |
@@ -25,7 +25,7 @@
 - Windows Node 24.3.0 + Miniflare 4.20260730.0：npm test 11/11，npm run build通过。
 - 本地四浏览器通过；公开网址四个独立Chrome身份完成9阶段，0页面错误，390px页面无横向溢出。
 - [GitHub Actions运行成功](https://github.com/hjkc111/mystery-room/actions/runs/34582353464)：Ubuntu上的构建、业务测试和四人浏览器流程。
-- AI未填真实Key，已测规则回退和Mock兼容协议。真人盲测、不同运营商网络、长期压测未执行。
+- 真实Key已配置为Sites Secret，直接接口及公网页面AI调用均通过。真人盲测、不同运营商网络、长期压测未执行。
 
 旧版记录见[历史设计](initial-design.md)，只证明当时本机版本的行为。
 

@@ -45,8 +45,10 @@ npm run build
 | Worker/D1并发 | 通过 | 同版本一写成功、去重、新实例恢复、600条大消息 |
 | 四浏览器流程 | 通过 | 4个Chrome上下文、9阶段、0页面错误、390px布局 |
 | Sites线上回归 | 通过 | 公开网址4个Chrome身份完成9阶段、0页面错误 |
-| 真实DeepSeek | 未验证 | 服务端真实Key |
+| 真实DeepSeek | 通过 | 2026-09-11接口HTTP200、公网四人开局后的AI主持回复 |
 
 WebMCP仅提供已授权视图的只读工具，浏览器功能检测后注册；当前没有支持该提案的原生浏览器环境，真实WebMCP调用未验收，不影响网页游戏。
 
 2026-09-11公网站点：https://valley-mystery-friends.hjkc20050804.chatgpt.site 。同一自动化脚本通过TEST_URL指定公网地址完成验证，未直接写数据库跳过游戏步骤。先前固定延时在公网可能过早断言，已改为等待页面阶段/操作结果。GitHub Actions首轮运行34582353464成功；后续文档提交的运行状态可在Actions页查看。
+
+真实AI检查见 [deepseek-verification.md](deepseek-verification.md)，手动脚本tools/live-ai-check.mjs不会加入CI。
