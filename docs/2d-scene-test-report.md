@@ -1,6 +1,6 @@
 # 2D 场景改版测试报告
 
-日期：2026-09-11。测试环境：Windows、Node 24.18.1、Chrome / Playwright、实际 Miniflare D1。公网首轮已确认健康检查与真实 AI 正常，并暴露网络抖动导致移动误判的问题，修复后复验。
+日期：2026-09-11。测试环境：Windows、Node 24.18.1、Chrome / Playwright、实际 Miniflare D1。公网完整四人九阶段复验已通过；首轮发现的网络抖动移动误判已修复。
 
 ## 已通过的验收
 
@@ -70,3 +70,16 @@ npm run test:live-ai
 - 390px 是浏览器视口验证，不等于所有实体手机和 Safari 都已实测。
 - 没有多小时压测或四名真人完整盲测；自动化通过证明流程可完成，不证明剧情体验已充分打磨。
 - 公开仓库包含剧情源码，不能阻止主动查仓库剧透。
+
+
+## 公网最终验收
+
+- 公开地址：https://valley-mystery-friends.hjkc20050804.chatgpt.site/
+- 发布状态 succeeded；本次运行代码为 3033a428f621f1fb9161347cc7cc3a85d73400c6。
+- 四个独立 Chrome 身份连接真实公网后端，测试房间 9ADD8B：完成全部九阶段，搜证和进门均实际按键行走，第三人不能进入已满会客室，新访客看不到旧私聊，最终成功结案；无页面脚本异常。
+- 此次公网后端测试中，四个浏览器仍在同一台电脑：P2P RTT 1 ms，另一窗口看到移动约 59 ms。这不能当作跨地域网络延迟。
+- /health 与两个素材图集、地图模块均返回 200；/.env、/server/case.mjs、/db/schema.ts 返回 404。
+- 真实公网 DeepSeek 主持已返回 mode=ai。服务端密钥配置保留，未写入前端或仓库。
+- 新增 600 ms 移动请求延迟、断网超时恢复、刷新保存、WebRTC 重新建连测试通过；最近 HTTP 回退功能采样 696 ms，前两次 802/820 ms。
+- GitHub 对运行代码执行的构建、16 项规则/API 测试、四真人全局、HTTP 故障测试、1 真人 + 3 AI 全局均通过：[自动测试记录](https://github.com/hjkc111/mystery-room/actions/runs/34615714911)。WebRTC 重建的补充断言在本机已通过，并已加入后续自动测试。
+- 截图由本次公网测试生成：test-results/scene-search.png、scene-private.png、scene-mobile.png、scene-ending.png；指标保存为 public-scene-metrics.json，本机指标另存 local-scene-metrics.json。
