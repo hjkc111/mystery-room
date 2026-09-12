@@ -71,3 +71,9 @@ npm run test:browser
 - [场景与碰撞配置](public/world-map.js)
 - 像素素材：[Kenney RPG](https://kenney.nl/assets/roguelike-rpg-pack)、[角色包](https://kenney.nl/assets/roguelike-characters)，CC0。许可保存在 public/assets/。
 - 故障回退测试：`node tools/browser-resilience.mjs`。
+
+## 下一轮：自主NPC、21点与视觉升级
+
+[完整方案与资料入口](docs/plans/npc-blackjack/README.md) · [当前进度](docs/plans/npc-blackjack/STATUS.md) · [配置约定](docs/plans/npc-blackjack/SETTINGS.md) · [免费素材](docs/plans/npc-blackjack/ASSETS.md)。
+
+2026-09-12：本轮仅完成文档和素材准备，新功能尚未实现或发布。最新CI的浏览器步骤存在失败，详见进度文档；不要把旧版本通过记录当作最新全绿。

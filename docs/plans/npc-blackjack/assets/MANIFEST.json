@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "status": "research-only-not-deployed",
+  "packs": [
+    {
+      "name": "kenney-roguelike-rpg",
+      "source": "https://kenney.nl/assets/roguelike-rpg-pack",
+      "license": "CC0-1.0",
+      "retrieved": "2026-09-12",
+      "archive": "archives/kenney_roguelike-rpg-pack.zip",
+      "bytes": 715373,
+      "sha256": "8e7d2378f8f794245645f6d7dc7aeeb246791410a7e512293c594b46a5a9524b",
+      "license_file": "licenses/kenney-roguelike-rpg.txt"
+    },
+    {
+      "name": "kenney-playing-cards",
+      "source": "https://kenney.nl/assets/playing-cards-pack",
+      "license": "CC0-1.0",
+      "retrieved": "2026-09-12",
+      "archive": "archives/kenney_playing-cards-pack.zip",
+      "bytes": 191985,
+      "sha256": "b93b0313818e9c8f6acc24b008efdec1d8a6360b13afe953beed23881588be3c",
+      "license_file": "licenses/kenney-playing-cards.txt"
+    },
+    {
+      "name": "kenney-ui",
+      "source": "https://kenney.nl/assets/ui-pack",
+      "license": "CC0-1.0",
+      "retrieved": "2026-09-12",
+      "archive": "archives/kenney_ui-pack.zip",
+      "bytes": 1229750,
+      "sha256": "a8a14a234911eb648c062622915c93e79e94e97cb7f9f375a70f6617f1174318",
+      "license_file": "licenses/kenney-ui.txt"
+    },
+    {
+      "name": "foozle-legend-main-character",
+      "source": "https://foozlecc.itch.io/legend-main-character",
+      "license": "CC0-1.0",
+      "retrieved": "2026-09-12",
+      "archive": "archives/foozle_legend-main-character.zip",
+      "bytes": 672027,
+      "sha256": "751ea1a9e3cbfb0bbfbf0330ca663bc43d1fa7ecbcef915cb9e31640a0496025",
+      "license_file": "licenses/foozle-legend-main-character.txt"
+    }
+  ]
+}
