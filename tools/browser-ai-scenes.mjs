@@ -8,7 +8,7 @@ const provider=http.createServer(async(req,res)=>{for await(const _ of req){}res
 await new Promise(r=>provider.listen(0,'127.0.0.1',r));const {mf}=await runtime({bindings:{DEEPSEEK_API_KEY:'test-only',AI_BASE_URL:'http://127.0.0.1:'+provider.address().port}});const origin=(await mf.ready).origin;
 const browser=await chromium.launch({channel:'chrome',headless:true}),p=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];p.on('pageerror',e=>errors.push(e.message));
 try{
- await p.goto(origin);await p.locator('#connection').filter({hasText:'身份已就绪'}).waitFor();await p.locator('#name').fill('AI场景房主');await p.locator('#create').click();await p.locator('#roles article').first().getByRole('button',{name:'选择这个角色',exact:true}).click();
+ await p.goto(origin);await p.locator('#connection').filter({hasText:'身份已就绪'}).waitFor();await p.locator('#name').fill('AI场景房主');await p.locator('#autonomousNpc').uncheck();await p.locator('#create').click();await p.locator('#roles article').first().getByRole('button',{name:'选择这个角色',exact:true}).click();
  for(let i=1;i<4;i++){await p.locator('#roles article').nth(i).getByRole('button',{name:'设为 AI 玩家',exact:true}).click();await p.locator('#roles article').nth(i).getByRole('button',{name:'移除 AI 玩家',exact:true}).waitFor();}
  async function advance(){await closePanels(p);await p.locator('#ready').click();await p.locator('#ready').filter({hasText:'取消准备'}).waitFor();await p.locator('#advance').click();}
  await advance();for(let phase=1;phase<=7;phase++){

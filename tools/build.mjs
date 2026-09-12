@@ -1,6 +1,10 @@
 import {build} from 'esbuild';
-import {readFileSync,mkdirSync,cpSync} from 'node:fs';
+import {readFileSync,mkdirSync,cpSync,readdirSync} from 'node:fs';
 const files={'/':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8'],'/scene.js':['scene.js','text/javascript; charset=utf-8'],'/world-map.js':['world-map.js','text/javascript; charset=utf-8'],'/realtime.js':['realtime.js','text/javascript; charset=utf-8'],'/assets/world.png':['assets/world.png','image/png'],'/assets/characters.png':['assets/characters.png','image/png'],'/assets/LICENSE-world.txt':['assets/LICENSE-world.txt','text/plain; charset=utf-8'],'/assets/LICENSE-characters.txt':['assets/LICENSE-characters.txt','text/plain; charset=utf-8']};
+for(const file of ['navigation.js','games.js'])files['/'+file]=[file,'text/javascript; charset=utf-8'];
+files['/assets/LICENSE-cards.txt']=['assets/LICENSE-cards.txt','text/plain; charset=utf-8'];
+files['/assets/manor-characters.png']=['assets/manor-characters.png','image/png'];
+for(const file of readdirSync('public/assets/cards').filter(f=>/^card_(back|(clubs|diamonds|hearts|spades)_(0[2-9]|10|A|J|Q|K))\.png$/.test(f)))files['/assets/cards/'+file]=['assets/cards/'+file,'image/png'];
 const assets=Object.fromEntries(Object.entries(files).map(([url,[file,type]])=>[url,{body:readFileSync('public/'+file,type==='image/png'?'base64':'utf8'),type,base64:type==='image/png'}]));
 await build({entryPoints:['server/worker.mjs'],bundle:true,format:'esm',platform:'browser',target:'es2022',outfile:'dist/server/index.js',plugins:[{name:'assets',setup(b){b.onResolve({filter:/^virtual:assets$/},()=>({path:'assets',namespace:'inline'}));b.onLoad({filter:/.*/,namespace:'inline'},()=>({contents:'export default '+JSON.stringify(assets),loader:'js'}));}}]});
 mkdirSync('dist/.openai',{recursive:true});cpSync('.openai/hosting.json','dist/.openai/hosting.json');cpSync('drizzle','dist/.openai/drizzle',{recursive:true});

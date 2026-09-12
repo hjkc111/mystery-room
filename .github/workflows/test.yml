@@ -22,6 +22,8 @@ jobs:
           npm run test:browser
           node tools/browser-resilience.mjs
           node tools/browser-ai-scenes.mjs
+          node tools/browser-games.mjs
+          node tools/browser-autonomous.mjs
         env:
           PORT: 4318
       - uses: actions/upload-artifact@v4

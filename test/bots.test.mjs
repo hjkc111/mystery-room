@@ -44,7 +44,7 @@ test('AI players: D1 permissions, mentions, private scope, failure, replay and f
  async function ok(u,type,payload,requestId){if(type==='investigate'){const spot=EVIDENCE_SPOTS[payload.targetId],v=await state(u);await placeBot(db,{code,phase:v.phase},u.id,spot.scene,spot.x,spot.y);}const r=await action(u,type,payload,requestId);assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.data.botError,undefined,r.data.botError);return r.data;}
  try{
   for(let i=0;i<2;i++){const s=await call('/api/session',{});users.push({id:s.data.id,cookie:s.res.headers.get('set-cookie').split(';')[0]});}
-  code=(await call('/api/create',{name:'房主'},users[0])).data.code;
+  code=(await call('/api/create',{name:'房主',autonomousNpc:false},users[0])).data.code;
   await call('/api/join',{code,name:'朋友'},users[1]);
   assert.equal((await action(users[1],'setBot',{role:2,enabled:true})).status,400);
   for(let i=0;i<2;i++)await ok(users[i],'role',{role:i});

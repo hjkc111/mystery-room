@@ -1,9 +1,12 @@
 import {SCENES,REACH,SPEED,spawn,allowedScenes,walkable,clearPath,distance,privateScene,EVIDENCE_SPOTS} from '../public/world-map.js';
 import {RuleError} from './game.mjs';
+import {pathPosition} from '../public/navigation.js';
 const reject=message=>{throw new RuleError(message);};
 export async function worldState(db,r){
  const rows=(await db.prepare('SELECT * FROM positions WHERE room=?').bind(r.code).all()).results,now=Date.now();
+ const saved=r.settings?.autonomousNpc?await db.prepare('SELECT body FROM simulation WHERE room=?').bind(r.code).first():null,sim=saved?JSON.parse(saved.body):null;
  const players=r.players.map((p,i)=>{const row=rows.find(q=>q.player===p.id),valid=row&&row.phase===r.phase&&allowedScenes(r.phase).includes(row.scene)&&(p.bot||now-row.seen<20000);
+  const n=sim?.phase===r.phase&&sim.npcs[p.id];if(p.bot&&n){const pos=n.path&&!r.paused&&!n.paused&&(p.botTask?.until||0)<=now?pathPosition(n.path,Math.max(0,Math.min(now,sim.at+2500)-n.started)):n.position;return {id:p.id,...n.position,...pos,seq:sim.at,seen:now,status:n.paused?'paused':n.status,path:n.path,started:n.started,simAt:sim.at};}
   return {id:p.id,...(valid?{scene:row.scene,x:row.x,y:row.y,phase:row.phase}:spawn(r.phase,i)),seq:row?.seq||0,seen:row?.seen||0};});
  return {players,serverTime:now};
 }
@@ -25,6 +28,7 @@ export async function moveWorld(db,r,id,data){
   if(!door||distance(p,door)>REACH)reject('请走近本阶段开放的门再按空格');
   const s=SCENES[door.to].spawn;next={...p,scene:door.to,x:s[0]+(r.players.findIndex(q=>q.id===id)-1.5)*40,y:s[1]};
  }else if(data.type==='inviteBot'){
+  if(r.settings?.autonomousNpc)reject('请使用 NPC 邀请，让角色自行走来');
   if(!privateScene(p.scene))reject('请先进入私人会客室');
   const bot=r.players.find(q=>q.id===data.playerId&&q.bot);if(!bot)reject('AI 玩家不存在');
   const bp=world.players.find(q=>q.id===bot.id);
@@ -34,8 +38,9 @@ export async function moveWorld(db,r,id,data){
  const capacity=privateScene(next.scene)?2:99;
  const result=await db.prepare(`INSERT INTO positions(room,player,phase,scene,x,y,seen,seq,credit,moved_at)
  SELECT ?,?,?,?,?,?,?,?,?,? WHERE (SELECT phase FROM rooms WHERE code=?)=?
- AND (SELECT count(*) FROM positions WHERE room=? AND phase=? AND scene=? AND player<>? AND (seen>? OR player LIKE 'bot-%'))<?
- ON CONFLICT(room,player) DO UPDATE SET phase=excluded.phase,scene=excluded.scene,x=excluded.x,y=excluded.y,seen=excluded.seen,seq=excluded.seq,credit=excluded.credit,moved_at=excluded.moved_at WHERE positions.seq=?`).bind(r.code,actor,r.phase,next.scene,next.x,next.y,now,seq,credit,now,r.code,r.phase,r.code,r.phase,next.scene,actor,now-20000,capacity,priorSeq).run();
+ AND (SELECT count(*) FROM positions WHERE room=? AND phase=? AND scene=? AND player<>? AND (seen>? OR player LIKE 'bot-%') AND (?=0 OR player NOT LIKE 'bot-%'))
+ +(SELECT count(*) FROM simulation s,json_each(s.body,'$.npcs') n WHERE s.room=? AND json_extract(s.body,'$.phase')=? AND n.key<>? AND ?=1 AND (json_extract(n.value,'$.position.scene')=? OR (json_extract(n.value,'$.reservation.scene')=? AND json_extract(n.value,'$.reservation.until')>?)))<?
+ ON CONFLICT(room,player) DO UPDATE SET phase=excluded.phase,scene=excluded.scene,x=excluded.x,y=excluded.y,seen=excluded.seen,seq=excluded.seq,credit=excluded.credit,moved_at=excluded.moved_at WHERE positions.seq=?`).bind(r.code,actor,r.phase,next.scene,next.x,next.y,now,seq,credit,now,r.code,r.phase,r.code,r.phase,next.scene,actor,now-20000,r.settings?.autonomousNpc?1:0,r.code,r.phase,actor,r.settings?.autonomousNpc?1:0,next.scene,next.scene,now,capacity,priorSeq).run();
  if(!result.meta.changes)reject('房间已满或位置已更新，请重新同步');
  return worldState(db,r);
 }

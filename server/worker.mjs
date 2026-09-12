@@ -4,6 +4,8 @@ import {botTarget,prepareBotTurn,askBot} from './bots.mjs';
 import assets from 'virtual:assets';
 import {worldState,moveWorld,validateSpatialAction,placeBot} from './world.mjs';
 import {EVIDENCE_SPOTS,spawn,privateScene} from '../public/world-map.js';
+import {simulationTick} from './simulation.mjs';
+import {activityView,activityAction} from './activities.mjs';
 class Fault extends Error {constructor(message,status=400){super(message);this.status=status;}}
 const fail=(message,status)=>{throw new Fault(message,status);};
 const json=(body,status=200,extra={})=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...extra}});
@@ -31,12 +33,13 @@ async function state(db,r,id,cfg){
  const rows=(await db.prepare('SELECT player,seen FROM seats WHERE room=?').bind(r.code).all()).results;
  const now=Date.now(),hostSeen=rows.find(p=>p.player===r.host)?.seen||r.createdAt,world=await worldState(db,r),scene=world.players.find(p=>p.id===id).scene;
  const signals=(await db.prepare('SELECT sender,body,at FROM signals WHERE room=? AND recipient=? AND at>?').bind(r.code,id,now-60000).all()).results;
- return {...view(r,id,rows.filter(p=>now-p.seen<20000).map(p=>p.player)),...await chatRows(db,r.code,id,{scene}),world,chatScene:scene,signals:signals.map(s=>({...JSON.parse(s.body),sender:s.sender,at:s.at})),ai:{configured:Boolean(cfg.key),model:cfg.model,remaining:Math.max(0,cfg.budget-r.aiCount)},hostAbsentSince:now-hostSeen>=20000?hostSeen:null};
+ return {...view(r,id,rows.filter(p=>now-p.seen<20000).map(p=>p.player)),...await chatRows(db,r.code,id,{scene}),settings:r.settings||{},activities:await activityView(db,r,id),world,chatScene:scene,signals:signals.map(s=>({...JSON.parse(s.body),sender:s.sender,at:s.at})),ai:{configured:Boolean(cfg.key),model:cfg.model,remaining:Math.max(0,cfg.budget-r.aiCount)},hostAbsentSince:now-hostSeen>=20000?hostSeen:null};
 }
 async function runBot(db,r,id,data,bot,cfg){
  const {type,payload,requestId}=data,key=id+':'+requestId,turn=type==='botTurn';
  if(r.phase===0||r.phase===8||r.paused)fail('AI 玩家在开局后、未暂停时参与对话和行动');
  if(turn&&r.host!==id)fail('只有房主可以让 AI 完成本幕',403);
+ if(turn&&r.settings?.autonomousNpc)fail('自主 NPC 会走到现场完成行动，可以暂停或召回');
  if(turn&&(bot.ready||bot.vote&&r.phase===7))fail('这位 AI 已完成本幕，可以通过 @ 继续对话');
  if(!cfg.key)fail('请先配置服务端 AI 密钥');
  if(bot.botTask?.until>Date.now())fail('这位 AI 正在思考，请稍后再试');
@@ -83,7 +86,7 @@ async function runBot(db,r,id,data,bot,cfg){
 async function handle(req,env){
  const url=new URL(req.url),path=url.pathname,db=env.DB;
  if(req.method==='GET'&&Object.hasOwn(assets,path)){const a=assets[path];return new Response(a.base64?Uint8Array.from(atob(a.body),c=>c.charCodeAt(0)):a.body,{headers:{'Content-Type':a.type,'Cache-Control':'no-cache'}});}
- if(path==='/health'&&req.method==='GET'){await db.prepare('SELECT code FROM rooms LIMIT 1').all();return json({ok:true,transport:'webrtc+http',pollMs:450,worldVersion:1});}
+ if(path==='/health'&&req.method==='GET'){await db.prepare('SELECT code FROM rooms LIMIT 1').all();return json({ok:true,transport:'webrtc+http',pollMs:450,worldVersion:2});}
  if(!path.startsWith('/api/'))return json({error:'不存在'},404);
  if(!['GET','POST'].includes(req.method))return json({error:'请求方式不支持'},405);
  if(req.method==='POST'&&req.headers.get('origin')!==(env.PUBLIC_ORIGIN||url.origin))fail('请求来源不允许',403);
@@ -107,6 +110,14 @@ async function handle(req,env){
  }
  if(req.method!=='POST')return json({error:'不存在'},404);
  const data=await readBody(req);
+ if(path==='/api/npc'){
+  await limit(db,'npc:'+id,60);const r=await room(db,data.room,id);
+  await simulationTick(db,r.code,{actor:id,command:data.command,cfg,history:async(player,scene)=>(await chatRows(db,r.code,player,{scene})).messages});
+  return json({state:await state(db,await room(db,r.code,id),id,cfg)});
+ }
+ if(path==='/api/cards'){
+  await limit(db,'cards:'+id,100);const r=await room(db,data.room,id);return json(await activityAction(db,r,id,data));
+ }
  if(path==='/api/world'){
   await limit(db,'movement:'+id,360);const r=await room(db,data.room,id);
   return json({world:await moveWorld(db,r,id,data)});
@@ -124,6 +135,7 @@ async function handle(req,env){
   if((await db.prepare('SELECT count(*) AS n FROM rooms').first()).n>=200)fail('服务房间上限已到达');
   let code;do{code=random().slice(0,6).toUpperCase();}while(await db.prepare('SELECT code FROM rooms WHERE code=?').bind(code).first());
   const r=createRoom(code,id,data.name);
+  r.settings={rulesVersion:'npc-cards-v1',autonomousNpc:data.autonomousNpc!==false,minigamesEnabled:true};
   await db.batch([db.prepare('INSERT INTO rooms(code,revision,body,host,phase) VALUES(?,?,?,?,?)').bind(code,0,JSON.stringify(r),id,0),db.prepare('INSERT INTO seats(room,player,seen) VALUES(?,?,?)').bind(code,id,Date.now())]);
   return json({code});
  }

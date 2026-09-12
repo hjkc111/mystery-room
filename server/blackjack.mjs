@@ -1,0 +1,15 @@
+import {RuleError} from './game.mjs';
+const requireRule=(condition,message)=>{if(!condition)throw new RuleError(message);};
+export function shuffledDeck(){const cards=Array.from({length:52},(_,i)=>i);for(let i=51;i>0;i--){const size=i+1,limit=Math.floor(4294967296/size)*size;let n;do{n=crypto.getRandomValues(new Uint32Array(1))[0];}while(n>=limit);const j=n%size;[cards[i],cards[j]]=[cards[j],cards[i]];}return cards;}
+export function handValue(hand){let total=0,aces=0;for(const c of hand){const rank=c%13+1;total+=rank===1?11:Math.min(rank,10);if(rank===1)aces++;}while(total>21&&aces){total-=10;aces--;}return {total,soft:aces>0,natural:hand.length===2&&total===21,bust:total>21};}
+export function compareHands(a,b){const x=handValue(a),y=handValue(b);if(x.bust&&y.bust)return 0;if(x.bust)return -1;if(y.bust)return 1;if(x.natural!==y.natural)return x.natural?1:-1;return Math.sign(x.total-y.total);}
+export function aiDecision(hand){const v=handValue(hand);return v.total<(v.soft?18:17)?'hit':'stand';}
+export function startRound(g,now,deck=shuffledDeck()){
+ g.round++;g.deck=deck;g.hands=[[],[]];const first=(g.round-1)%2;for(let i=0;i<4;i++)g.hands[(first+i)%2].push(g.deck.pop());
+ g.done=g.hands.map(h=>handValue(h).total>=21);g.status='playing';g.deadline=now+45000;g.aiAt=now+800+crypto.getRandomValues(new Uint32Array(1))[0]%801;settle(g,now);
+}
+export function createMatch(seats,now){const g={seats,round:0,scores:[0,0],results:[],requests:{},status:'playing'};startRound(g,now);return g;}
+function settle(g,now){if(g.status!=='playing'||!g.done.every(Boolean))return;const result=compareHands(...g.hands);g.scores[0]+=result>0?1:result===0?.5:0;g.scores[1]+=result<0?1:result===0?.5:0;g.results.push({round:g.round,result,hands:structuredClone(g.hands)});g.status=g.round===3?'finished':'reveal';g.deadline=now+6000;}
+export function cardAction(g,id,type,now){const seat=g.seats.indexOf(id);requireRule(seat>=0,'你没有坐在这张牌桌');requireRule(g.status==='playing'&&now<g.deadline,'本轮已结束');requireRule(!g.done[seat],'你已结束本轮');requireRule(['hit','stand'].includes(type),'无效牌桌操作');if(type==='hit'){g.hands[seat].push(g.deck.pop());g.done[seat]=handValue(g.hands[seat]).total>=21;}else g.done[seat]=true;settle(g,now);}
+export function advanceCards(g,now,bots=[]){if(g.status==='playing'){if(now>=g.deadline){g.done=[true,true];settle(g,now);}else if(now>=g.aiAt){for(let i=0;i<2&&g.status==='playing';i++)if(bots.includes(g.seats[i])&&!g.done[i])cardAction(g,g.seats[i],aiDecision(g.hands[i]),now);g.aiAt=now+800+crypto.getRandomValues(new Uint32Array(1))[0]%801;}}else if(g.status==='reveal'&&now>=g.deadline)startRound(g,now);}
+export function cardView(g,id){if(!g)return null;const seat=g.seats.indexOf(id),reveal=['reveal','finished'].includes(g.status);return {status:g.status,seats:g.seats,round:g.round,scores:g.scores,deadline:g.deadline,reason:g.reason,forfeit:g.forfeit,seat,hands:g.hands?.map((h,i)=>seat>=0&&(i===seat||reveal)?h:null),values:g.hands?.map((h,i)=>seat>=0&&(i===seat||reveal)?handValue(h):null),done:g.done?.map((v,i)=>seat>=0?v:null),results:seat>=0?g.results:undefined};}

@@ -1,7 +1,8 @@
 export const WIDTH=768,HEIGHT=480,TILE=32,SPEED=160,RADIUS=10,REACH=56;
 const door=(id,to,x,y)=>({id,to,x,y});
 export const SCENES={
- hall:{name:'庄园大厅',kind:'hall',spawn:[384,368],walls:[[256,160,256,128]],doors:[door('garden','garden',720,240),door('meeting-a','meeting-a',48,144),door('meeting-b','meeting-b',48,336)]},
+ hall:{name:'庄园大厅',kind:'hall',spawn:[384,368],walls:[[256,160,256,128]],doors:[door('garden','garden',720,240),door('meeting-a','meeting-a',48,144),door('meeting-b','meeting-b',48,336),door('lounge','lounge',384,432)]},
+ lounge:{name:'雨夜休息室',kind:'lounge',spawn:[384,368],walls:[[288,176,192,80],[96,96,96,64],[576,96,96,64]],doors:[door('hall','hall',384,432)]},
  reading:{name:'安静阅览室',kind:'reading',spawn:[384,368],walls:[[160,128,96,64],[512,128,96,64],[336,96,96,64]],doors:[]},
  garden:{name:'庄园庭院',kind:'garden',spawn:[384,368],walls:[[128,128,64,64],[544,288,64,64],[352,192,64,64]],doors:[door('hall','hall',48,240),door('bank','bank',720,144),door('study','study',720,336)]},
  bank:{name:'水潭岸边',kind:'bank',spawn:[384,368],walls:[[96,96,224,224],[544,96,64,64]],doors:[door('garden','garden',720,336)]},
@@ -17,7 +18,7 @@ export const EVIDENCE_SPOTS={
  weapon:{scene:'bank',x:448,y:304},route:{scene:'garden',x:256,y:112},
  garment:{scene:'garden',x:480,y:240},dossier:{scene:'study',x:224,y:288},
 };
-export function allowedScenes(phase){return phase===1?['reading']:[3,5].includes(phase)?['garden','bank','study','hall','meeting-a','meeting-b']:[4,6].includes(phase)?['hall','meeting-a','meeting-b']:['hall'];}
+export function allowedScenes(phase){return phase===1?['reading']:[3,5].includes(phase)?['garden','bank','study','hall','meeting-a','meeting-b']:phase===4?['hall','meeting-a','meeting-b','lounge']:phase===6?['hall','meeting-a','meeting-b']:[0,8].includes(phase)?['hall','lounge']:['hall'];}
 export function spawn(phase,index=0){const scene=allowedScenes(phase)[0],s=SCENES[scene].spawn;return {scene,x:s[0]+(index%4-1.5)*40,y:s[1],phase};}
 export function privateScene(scene){return SCENES[scene]?.kind==='meeting';}
 export function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
