@@ -13,6 +13,7 @@ export async function simulationTick(db,code,{command,actor,cfg,history}={}){
  const row=await db.prepare('UPDATE simulation SET lease=?,until=? WHERE room=? AND until<? RETURNING body,revision').bind(lease,now+25000,code,now).first();if(!row){if(command)throw new RuleError('NPC 正在处理上一项任务，请稍后重试');return;}
  try{
   const sim=JSON.parse(row.body),world=await worldState(db,r),last=sim.at;
+  if(r.autoAiCount===undefined){r.autoAiCount=sim.autoCount||0;r.autoAiCalls=sim.calls||{};r.autoAiAt=sim.lastCall||0;}
   if(!command&&Object.keys(sim.npcs).length&&now-last<1500)return;
   const activityRow=await db.prepare('SELECT body FROM activities WHERE room=?').bind(code).first(),activity=activityRow?JSON.parse(activityRow.body):null;
   if(sim.phase!==r.phase){sim.phase=r.phase;sim.npcs={};sim.phaseAt=now;}
@@ -45,11 +46,11 @@ export async function simulationTick(db,code,{command,actor,cfg,history}={}){
    if(r.phase===4){const clue=v.clues.find(c=>c.owned&&!(p.shared||[]).includes(c.id));if(clue){act(r,p.id,'publish',{clueId:clue.id});changed=true;n.due=now+2000;continue;}}
    if([2,6,7].includes(r.phase)&&n.spoken!==r.phase&&(called||message))continue;
    if([2,6,7].includes(r.phase)&&n.spoken!==r.phase&&!called&&!message){
-    if(cfg?.key&&r.phase===7&&now-(sim.lastCall||0)<45000){n.status='thinking';n.due=sim.lastCall+45000;continue;}
-    called=true;let answer;sim.calls||={};const canCall=cfg?.key&&sim.autoCount<24&&(sim.calls[p.id]||0)<8&&r.aiCount<cfg.budget-24&&now-(sim.lastCall||0)>=45000;
+    if(cfg?.key&&r.phase===7&&now-(r.autoAiAt||0)<45000){n.status='thinking';n.due=r.autoAiAt+45000;continue;}
+    called=true;let answer;const canCall=cfg?.key&&(r.autoAiCount||0)<24&&(r.autoAiCalls?.[p.id]||0)<8&&r.aiCount<cfg.budget-24&&now-(r.autoAiAt||0)>=45000;
     if(canCall){
      // Reserve the shared budget before the external request, including failed requests.
-     const reserved=structuredClone(r);reserved.aiCount++;reserved.revision++;const ok=await db.prepare('UPDATE rooms SET body=?,revision=? WHERE code=? AND revision=?').bind(JSON.stringify({...reserved,messages:[]}),reserved.revision,code,r.revision).run();if(!ok.meta.changes)return;r=reserved;sim.autoCount++;sim.calls[p.id]=(sim.calls[p.id]||0)+1;sim.lastCall=now;
+     const reserved=structuredClone(r);reserved.aiCount++;reserved.autoAiCount=(reserved.autoAiCount||0)+1;reserved.autoAiCalls||={};reserved.autoAiCalls[p.id]=(reserved.autoAiCalls[p.id]||0)+1;reserved.autoAiAt=now;reserved.revision++;const ok=await db.prepare('UPDATE rooms SET body=?,revision=? WHERE code=? AND revision=?').bind(JSON.stringify({...reserved,messages:[]}),reserved.revision,code,r.revision).run();if(!ok.meta.changes)return;r=reserved;
      try{answer=await askBot(view(r,p.id),await history(p.id,n.position.scene),{turn:true},cfg);}catch{}
      const current=await readRoom(db,code);if(current.phase!==r.phase||current.paused||current.revision!==r.revision)return;
     }

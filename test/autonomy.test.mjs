@@ -4,6 +4,16 @@ import {simulationTick} from '../server/simulation.mjs';import {worldState,place
 import {route,pathPosition,nextDoor} from '../public/navigation.js';import {clearPath,distance,EVIDENCE_SPOTS} from '../public/world-map.js';
 import {activityAction,activityView} from '../server/activities.mjs';
 import '../tools/build.mjs';
+import http from 'node:http';
+import {config} from '../server/ai.mjs';
+test('autonomous model budget survives a concurrent room update and failed result commit',async()=>{
+ let calls=0;const provider=http.createServer(async(req,res)=>{for await(const _ of req){}calls++;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{content:'{"text":"test reply","vote":null}'}}]}));});await new Promise(r=>provider.listen(0,'127.0.0.1',r));const {mf,db}=await runtime();
+ try{const r=createRoom('BUDGET','host','房主');act(r,'host','setBot',{role:1,enabled:true});r.phase=2;r.settings={autonomousNpc:true};await db.prepare('INSERT INTO rooms VALUES(?,?,?,?,?)').bind(r.code,0,JSON.stringify(r),'host',2).run();await db.prepare('INSERT INTO seats VALUES(?,?,?)').bind(r.code,'host',Date.now()).run();await simulationTick(db,r.code);let sim=JSON.parse((await db.prepare('SELECT body FROM simulation').first()).body);sim.at-=2000;sim.npcs[r.players[1].id].due=0;await db.prepare('UPDATE simulation SET body=?').bind(JSON.stringify(sim)).run();
+ const cfg=config({DEEPSEEK_API_KEY:'test-only',AI_BASE_URL:'http://127.0.0.1:'+provider.address().port});await simulationTick(db,r.code,{cfg,history:async()=>{const current=JSON.parse((await db.prepare('SELECT body FROM rooms').first()).body);current.revision++;await db.prepare('UPDATE rooms SET body=?,revision=?').bind(JSON.stringify(current),current.revision).run();return [];}});
+ const current=JSON.parse((await db.prepare('SELECT body FROM rooms').first()).body);assert.equal(calls,1);assert.equal(current.aiCount,1);assert.equal(current.autoAiCount,1);assert.equal(current.autoAiCalls[r.players[1].id],1);assert.ok(current.autoAiAt>0);
+ current.autoAiCount=24;current.autoAiAt=0;await db.prepare('UPDATE rooms SET body=?').bind(JSON.stringify(current)).run();await simulationTick(db,r.code,{cfg,history:async()=>[]});assert.equal(calls,1,'exhausted autonomous budget must not call the provider again');
+ }finally{await mf.dispose();provider.closeAllConnections();await new Promise(r=>provider.close(r));}
+});
 test('path projection never replaces a player identity with a door identifier',()=>{assert.deepEqual(pathPosition([{x:0,y:0},{id:'lounge',to:'lounge',x:1,y:0}],100),{x:1,y:0,arrived:true});});
 test('navigation detours around furniture with collision-checked segments and time-based arrival',()=>{const p=route('hall',{x:384,y:368},{x:384,y:96});assert.ok(p.length>2);for(let i=1;i<p.length;i++)assert.ok(clearPath('hall',p[i-1],p[i]));assert.equal(pathPosition(p,0).arrived,false);assert.equal(pathPosition(p,100000).arrived,true);assert.equal(nextDoor('study','bank',3).to,'garden');assert.equal(nextDoor('hall','bank',2),null);});
 test('NPC D1 authority: no clue before walking, capped offline progress, pause, concurrent lease',async()=>{
