@@ -2,16 +2,19 @@ import {SCENES,EVIDENCE_SPOTS,WIDTH,HEIGHT,TILE,REACH,spawn,allowedScenes,privat
 import {Realtime} from './realtime.js';
 import {updateGames,openGames,npcCommand} from './games.js';
 window.npcCommand=npcCommand;
-const $=id=>document.getElementById(id),canvas=$('world'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id),canvas=$('world');let ctx=canvas.getContext('2d');
 let state=null,local=null,seq=0,keys=new Set(),path=[],sending=null,lastFrame=0,lastPose=0,lastSave=0,lastPath=0,online=true,peerSync=false,selectedPanel=null,interaction=null;
 const motion=localStorage.getItem('mystery-motion');let reducedMotion=motion===null?matchMedia('(prefers-reduced-motion: reduce)').matches:motion==='reduced';
 const preferences=document.createElement('label');preferences.className='small';const reduce=document.createElement('input');reduce.type='checkbox';reduce.checked=reducedMotion;reduce.onchange=()=>{reducedMotion=reduce.checked;localStorage.setItem('mystery-motion',reducedMotion?'reduced':'full');};preferences.append(reduce,document.createTextNode(' 减少动态'));document.querySelector('.scene-toolbar').append(preferences);
 const peers=new Map(),colors=['#e9be78','#79c6d1','#d9a7cc','#9ccb88'];
 const atlas=new Image(),characters=new Image();atlas.src='/assets/world.png';characters.src='/assets/characters.png';
 const manor=new Image();manor.src='/assets/manor-characters.png';
+const furnishings=new Image();furnishings.src='/assets/manor-furnishings.png';
+const terrain=new Image();terrain.src='/assets/manor-terrain.png';
+const roomSurfaces=new Map();for(const img of [atlas,furnishings,terrain])img.addEventListener('load',()=>roomSurfaces.clear());
 const poses=[[[109,69,136,245],[410,69,123,243],[709,63,129,249],[1003,66,144,247]],[[132,363,97,252],[415,362,113,252],[722,361,120,254],[1031,360,102,255]],[[107,656,138,245],[410,656,123,245],[708,653,132,248],[1001,653,151,248]],[[121,942,99,254],[415,942,113,254],[702,942,127,255],[1020,942,106,255]]];
 const facing=new Map(),lastDrawn=new Map();
-Promise.all([atlas.decode(),characters.decode()]).then(()=>$('sceneLoading').hidden=true).catch(()=>$('sceneLoading').textContent='素材加载失败，请刷新页面重试');
+Promise.all([atlas.decode(),characters.decode(),manor.decode(),furnishings.decode(),terrain.decode()]).then(()=>{$('sceneLoading').hidden=true;canvas.dataset.artReady='true';}).catch(()=>$('sceneLoading').textContent='素材加载失败，请刷新页面重试');
 async function api(url,data){const res=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(10000)});const value=await res.json();if(!res.ok)throw new Error(value.error||'场景同步失败');return value;}
 const rtc=new Realtime({api,onPose:(id,p)=>peers.set(id,{...p,at:performance.now()}),onInvalidate:()=>window.refreshGame?.(),onStatus:s=>{$('realtimeStatus').textContent=!online?'连接中断 · 正在恢复':`${s.mode==='WebRTC'?`实时直连 ${s.channels} 人`:'服务器同步'}${s.rtt===null?'':` · RTT ${s.rtt} ms`}`;canvas.dataset.transport=s.mode;canvas.dataset.rtt=s.rtt??'';}});
 function resetPosition(p){local={...p};seq=p.seq||0;path=[];}
@@ -53,20 +56,46 @@ canvas.addEventListener('pointerdown',()=>canvas.focus());
 for(const b of document.querySelectorAll('[data-move]')){b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);keys.add(b.dataset.move);});for(const event of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(event,()=>keys.delete(b.dataset.move));}
 $('interact').onclick=interact;
 function tile(col,row,x,y,w=TILE,h=TILE,img=atlas){if(img.complete&&img.naturalWidth)ctx.drawImage(img,col*17,row*17,16,16,x,y,w,h);}
+// Artwork stays within the authoritative obstacle footprints; boundary props stay outside walking space.
+function furnishing(index,x,y,w,h){
+ if(!furnishings.complete||!furnishings.naturalWidth)return false;
+ const [sx,sy,sw,sh]=[[42,24,233,290],[356,49,230,248],[664,55,236,255],[1003,64,186,215],[48,347,219,250],[327,371,289,214],[642,380,284,204],[1034,369,128,215],[28,642,257,264],[336,645,270,268],[656,654,254,254],[1007,661,175,231],[27,957,263,233],[360,934,222,272],[641,965,287,226],[961,993,269,188]][index];
+ ctx.save();if(index===0){ctx.translate(x+w/2,y+h/2);ctx.rotate(-Math.PI/2);ctx.drawImage(furnishings,sx,sy,sw,sh,-h/2,-w/2,h,w);}else ctx.drawImage(furnishings,sx,sy,sw,sh,x,y,w,h);ctx.restore();return true;
+}
+function ground(index,x,y,w,h){if(!terrain.complete||!terrain.naturalWidth)return false;const size=terrain.naturalWidth/2;ctx.save();if(index===2){ctx.fillStyle='#243c32';ctx.fillRect(x,y,w,h);ctx.globalAlpha=.5;}ctx.drawImage(terrain,(index%2)*size,Math.floor(index/2)*size,size,size,x,y,w,h);ctx.restore();return true;}
 function floor(scene){
- const outdoor=['garden','bank'].includes(scene.kind);ctx.fillStyle=outdoor?'#334735':'#43372b';ctx.fillRect(0,0,WIDTH,HEIGHT);
+ const key=Object.keys(SCENES).find(k=>SCENES[k]===scene);
+ if(roomSurfaces.has(key)){ctx.drawImage(roomSurfaces.get(key),0,0);return;}
+ const liveContext=ctx,surface=document.createElement('canvas');surface.width=WIDTH;surface.height=HEIGHT;ctx=surface.getContext('2d');ctx.imageSmoothingEnabled=false;
+ const outdoor=['garden','bank'].includes(scene.kind);
+ ctx.fillStyle=outdoor?'#334735':'#43372b';ctx.fillRect(0,0,WIDTH,HEIGHT);
  for(let y=0;y<15;y++)for(let x=0;x<24;x++){tile(5,outdoor?1:2,x*TILE,y*TILE);if(x===0||y===0||x===23||y===14)tile(6,2,x*TILE,y*TILE);}
- // Paths, carpets and pools of lamplight anchor the rooms visually.
- if(outdoor){ctx.fillStyle='#79766a';ctx.fillRect(48,352,672,32);ctx.fillRect(688,128,32,224);ctx.fillRect(48,224,80,32);ctx.fillStyle='#959184';for(let x=56;x<720;x+=24){ctx.fillRect(x,357,18,9);ctx.fillRect(x+6,371,16,8);}ctx.fillStyle='#c4aa7270';for(const [x,y]of [[80,336],[656,336],[656,96]]){ctx.fillRect(x,y-30,4,30);ctx.fillStyle='#edd393';ctx.fillRect(x-4,y-37,12,10);ctx.fillStyle='#c4aa7225';ctx.beginPath();ctx.ellipse(x,y+2,30,15,0,0,Math.PI*2);ctx.fill();}}
- else{ctx.fillStyle='#342c2b';ctx.fillRect(208,112,352,288);ctx.fillStyle=scene.kind==='lounge'?'#214d43':'#694339';ctx.fillRect(214,118,340,276);ctx.strokeStyle='#b59b64';ctx.lineWidth=2;ctx.strokeRect(224,128,320,256);ctx.strokeRect(230,134,308,244);for(let y=144;y<384;y+=32){ctx.fillStyle='#ae8b4f60';ctx.fillRect(238,y,4,4);ctx.fillRect(522,y,4,4);}for(const x of [80,672]){ctx.fillStyle='#1d2b36';ctx.fillRect(x-24,38,48,64);ctx.strokeStyle='#a28c67';ctx.strokeRect(x-24,38,48,64);ctx.beginPath();ctx.moveTo(x,38);ctx.lineTo(x,102);ctx.moveTo(x-24,70);ctx.lineTo(x+24,70);ctx.stroke();ctx.fillStyle='#e6b96a13';ctx.beginPath();ctx.moveTo(x-24,104);ctx.lineTo(x+24,104);ctx.lineTo(x+58,172);ctx.lineTo(x-58,172);ctx.fill();}}
- for(const [x,y,w,h] of scene.walls){
-  if(scene.kind==='bank'&&x===96){for(let dy=0;dy<h;dy+=32)for(let dx=0;dx<w;dx+=32)tile(dx===0&&dy===0?2:dy===0?3:0,0,x+dx,y+dy);}
-  else if(outdoor)tile(16,scene.kind==='garden'?10:11,x,y-16,w,h+16);
-  else if(scene.kind==='hall'||scene.kind==='meeting'||scene.kind==='lounge'){ctx.fillStyle='#211b18aa';ctx.fillRect(x+8,y+12,w,h);ctx.fillStyle='#755336';ctx.fillRect(x,y,w,h-6);ctx.fillStyle=scene.kind==='lounge'?'#214d43':'#bc9360';ctx.fillRect(x+8,y+8,w-16,h-22);ctx.fillStyle='#a37d50';for(let dy=24;dy<h-20;dy+=24)if(scene.kind!=='lounge')ctx.fillRect(x+8,y+dy,w-16,2);for(let i=32;i<w;i+=64){tile(15,2,x+i,y-32);tile(15,2,x+i,y+h);}if(scene.kind==='lounge'&&x===288){ctx.fillStyle='#eadfc5';ctx.fillRect(366,198,20,28);ctx.fillRect(392,204,20,28);ctx.fillStyle='#a54335';ctx.font='bold 16px serif';ctx.fillText('A',376,218);ctx.fillStyle='#e6b96a';ctx.font='14px system-ui';ctx.textAlign='center';ctx.fillText('21 点 · 记忆翻牌',384,285);}else if(w>180){for(const dx of [w/3,w*2/3]){ctx.fillStyle='#efe0b4';ctx.fillRect(x+dx,y+24,4,14);ctx.fillStyle='#f7ce6b';ctx.fillRect(x+dx,y+19,4,5);}}}
-  else {for(let dx=0;dx<w;dx+=32)tile(42,14,x+dx,y,32,h);}
+ if(ground(outdoor?2:0,32,32,704,416)){ctx.save();ctx.beginPath();ctx.rect(0,0,768,32);ctx.rect(0,448,768,32);ctx.rect(0,32,32,416);ctx.rect(736,32,32,416);ctx.clip();ground(1,0,0,768,480);ctx.restore();}
+ ctx.fillStyle=outdoor?'#112e3018':scene.kind==='study'?'#242e3940':'#25262d20';ctx.fillRect(0,0,WIDTH,HEIGHT);
+ // Existing room geometry and rugs provide the ground plane beneath the detailed sprite furniture.
+ if(outdoor){ctx.save();ctx.beginPath();ctx.rect(48,352,672,32);ctx.rect(688,128,32,224);ctx.rect(48,224,80,32);ctx.clip();ground(1,0,0,768,480);ctx.restore();}
+ else{
+  const rugs=scene.kind==='reading'?[[128,112,160,208],[480,112,160,208]]:scene.kind==='study'?[[288,200,192,144]]:scene.kind==='lounge'?[[240,144,288,224]]:scene.kind==='meeting'?[[256,144,256,208]]:[[208,112,352,288]];
+  for(const rug of rugs)furnishing(14,...rug);
+  for(const x of [80,672]){ctx.fillStyle='#1d2b36';ctx.fillRect(x-24,38,48,64);ctx.strokeStyle='#a28c67';ctx.lineWidth=2;ctx.strokeRect(x-24,38,48,64);ctx.beginPath();ctx.moveTo(x,38);ctx.lineTo(x,102);ctx.moveTo(x-24,70);ctx.lineTo(x+24,70);ctx.stroke();ctx.fillStyle='#e6b96a13';ctx.beginPath();ctx.moveTo(x-24,104);ctx.lineTo(x+24,104);ctx.lineTo(x+58,172);ctx.lineTo(x-58,172);ctx.fill();}
  }
- // Decorations sit against the boundary, outside the movement area.
- if(!outdoor)for(let x=96;x<704;x+=96)tile(41,14,x,20);else for(let x=96;x<704;x+=128)tile(16,11,x,8,48,48);
+ for(const [i,[x,y,w,h]]of scene.walls.entries()){
+  if(scene.kind==='bank'&&x===96){ground(1,x,y,w,h);ground(3,x+6,y+6,w-12,h-12);}
+  else{
+   const index=scene.kind==='hall'?0:scene.kind==='lounge'?[1,5,6][i]:scene.kind==='reading'?[2,2,4][i]:scene.kind==='study'?[4,13,2][i]:scene.kind==='meeting'?3:scene.kind==='garden'?[15,10,9][i]:10;
+   ctx.save();ctx.shadowColor='#07121899';ctx.shadowBlur=6;ctx.shadowOffsetY=4;
+   if(scene.kind==='meeting'){furnishing(key==='meeting-a'?5:6,x,y,64,h);furnishing(3,x+64,y+10,64,h-20);furnishing(key==='meeting-a'?5:6,x+128,y,64,h);}
+   else if([4,13].includes(index)&&w>128){const count=Math.ceil(w/80);for(let n=0;n<count;n++)furnishing(index,x+n*w/count,y,w/count,h);}
+   else if(!furnishing(index,x,y,w,h)){for(let dx=0;dx<w;dx+=32)tile(42,14,x+dx,y,32,h);}
+   ctx.restore();
+  }
+ }
+ // Border furniture adds room identity without introducing invisible collision or hiding clues.
+ const border=outdoor?[15,8,10,15,8]:scene.kind==='reading'?[4,4,11,4,4]:scene.kind==='study'?[4,13,12,4,11]:scene.kind==='meeting'?[8,13,12,11,8]:[8,13,12,4,8];
+ for(const [i,index]of border.entries())furnishing(index,130+i*110,2,48,28);
+ if(outdoor){for(let x=0;x<WIDTH;x+=50){furnishing(15,x,0,50,30);furnishing(15,x,452,50,28);}for(let y=32;y<448;y+=52){furnishing(8,0,y,30,50);furnishing(8,738,y,30,50);}}
+ const shade=ctx.createRadialGradient(384,240,100,384,240,460);shade.addColorStop(0,'#07151d00');shade.addColorStop(1,outdoor?'#07151d88':'#07151d66');ctx.fillStyle=shade;ctx.fillRect(0,0,WIDTH,HEIGHT);
+ roomSurfaces.set(key,surface);ctx=liveContext;ctx.drawImage(surface,0,0);
 }
 function draw(now){requestAnimationFrame(draw);const dt=lastFrame?Math.min((now-lastFrame)/1000,.05):0;lastFrame=now;if(!state||!local)return;
  if(!state.paused&&online){const before=local;local=stepPosition(local,Number(keys.has('right'))-Number(keys.has('left')),Number(keys.has('down'))-Number(keys.has('up')),dt);
